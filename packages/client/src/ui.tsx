@@ -153,7 +153,7 @@ export function Root({ app }: { app: App }) {
   return (
     <div class="shell">
       <div class="topbar">
-        <h1>Settlers remake</h1>
+        <h1>Pioneers</h1>
         <button title="Back to the main screen" onClick={() => app.openMenu()}>☰ Menu</button>
         <div class="group">
           <span class="label">Tool</span>
@@ -220,7 +220,7 @@ export function Root({ app }: { app: App }) {
       {app.screen === 'menu' && (
         <div class="menu" role="dialog" aria-label="Main screen">
           <div class="menu-card">
-            <h1>Settlers remake</h1>
+            <h1>Pioneers</h1>
             <p class="menu-sub">Roads, carriers and a growing colony.</p>
             <button class="primary" onClick={startNew}>New game</button>
             <button class="primary" disabled={!app.canContinue} onClick={() => app.continueGame()}>

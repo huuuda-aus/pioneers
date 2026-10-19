@@ -14,5 +14,9 @@
     "@types/node": "^26.6.5",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
-  }
+  },
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+  },
+  "description": "Pioneers: a browser remake of The Settlers (1993), built around the road-and-carrier economy"
 }
