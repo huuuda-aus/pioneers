@@ -103,3 +103,24 @@ th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .radial-item.off:hover { transform: none; background: rgba(24, 38, 28, 0.94); }
 @keyframes radial-pop { from { opacity: 0; transform: scale(0.4); } to { opacity: 1; transform: scale(1); } }
 @keyframes radial-ring { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
+
+/* the list of buildings a flag can take */
+.radial-ring.small { left: -9px; top: -9px; width: 18px; height: 18px; background: none; border-style: solid; }
+.build-list {
+  position: absolute; left: 22px; top: -90px; width: 252px; overflow-y: auto; pointer-events: auto; padding: 6px;
+  background: rgba(20, 32, 24, 0.97); border: 1.5px solid var(--accent); border-radius: 10px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  animation: radial-pop .14s ease-out both; transform-origin: left center;
+}
+.radial[data-flip="1"] .build-list { left: auto; right: 22px; transform-origin: right center; }
+.build-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.build-head .back { padding: 2px 8px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.build-row {
+  display: grid; grid-template-columns: 14px 1fr auto; column-gap: 8px; align-items: center; width: 100%; text-align: left;
+  padding: 5px 7px; margin: 2px 0; background: rgba(40, 60, 44, 0.8); border: 1px solid transparent; border-radius: 6px; font-size: 13px;
+}
+.build-row:hover { border-color: var(--accent); background: rgba(70, 96, 48, 0.9); }
+.build-row .chip { width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0, 0, 0, 0.5); }
+.build-row .cost { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.build-row .why { grid-column: 2 / 4; color: #c98f7a; font-size: 11px; line-height: 1.25; }
+.build-row.off { opacity: .62; cursor: not-allowed; }
+.build-row.off:hover { border-color: transparent; background: rgba(40, 60, 44, 0.8); }

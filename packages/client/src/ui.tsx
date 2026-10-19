@@ -54,7 +54,9 @@ const BUILD: ToolInfo[] = [
   { id: 'well', label: 'Well', key: 'q', help: 'Needs 1 plank and 1 stone. Draws water for the baker.' },
   { id: 'mill', label: 'Mill', key: 'w', help: 'Needs 2 planks and 2 stone. Grinds wheat into flour.' },
   { id: 'baker', label: 'Baker', key: 'e', help: 'Needs 2 planks and 2 stone. Bakes bread from flour and water. Bread feeds mines.' },
-  { id: 'stonemine', label: 'Stone mine', key: 'r', help: 'Needs 3 planks. Goes on a mountain; a grey sign from a geologist says there is stone under it. Eats one fish or bread for every stone it digs out: without food it stops, and when the ore within 3 steps is used up it stops for good.' },
+  { id: 'pigfarm', label: 'Pig farm', key: 'a', help: 'Needs 3 planks and 1 stone. Raises a pig from one wheat and one water. Pigs go to the butcher.' },
+  { id: 'butcher', label: 'Butcher', key: 's', help: 'Needs 2 planks and 1 stone, and a worker with a cleaver. Turns a pig into meat. Meat feeds mines, like fish and bread.' },
+  { id: 'stonemine', label: 'Stone mine', key: 'r', help: 'Needs 3 planks. Goes on a mountain; a grey sign from a geologist says there is stone under it. Eats one fish, bread or meat for every stone it digs out: without food it stops, and when the ore within 3 steps is used up it stops for good.' },
   { id: 'coalmine', label: 'Coal mine', key: 't', help: 'Needs 3 planks. Goes on a mountain; a black sign from a geologist says there is coal under it. Eats food like every mine; its coal feeds the smelters.' },
   { id: 'ironmine', label: 'Iron mine', key: 'y', help: 'Needs 3 planks. Goes on a mountain; a rust sign from a geologist says there is iron under it. Eats food; the ore goes to an iron smelter.' },
   { id: 'goldmine', label: 'Gold mine', key: 'u', help: 'Needs 3 planks. Goes on a mountain; a yellow sign from a geologist says there is gold under it. Eats food; the ore goes to a gold smelter.' },
@@ -256,7 +258,14 @@ export function Root({ app }: { app: App }) {
   );
 }
 
-const ICONS: Record<'road' | 'geologist' | 'demolish', preact.ComponentChildren> = {
+const ICONS: Record<'build' | 'road' | 'geologist' | 'demolish', preact.ComponentChildren> = {
+  build: (
+    <>
+      <path d="M4 12 L13 4 L22 12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M7 11 V21 H19 V11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" />
+      <path d="M11 21 V15 H15 V21" fill="none" stroke="currentColor" stroke-width="1.8" />
+    </>
+  ),
   road: (
     <>
       <path d="M5 21 C 9 13, 4 9, 11 3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
@@ -276,6 +285,10 @@ const ICONS: Record<'road' | 'geologist' | 'demolish', preact.ComponentChildren>
     </>
   ),
 };
+
+/** "2 planks, 1 stone" */
+const costText = (planks: number, stones: number): string =>
+  [planks ? `${planks} plank${planks > 1 ? 's' : ''}` : '', stones ? `${stones} stone${stones > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') || 'free';
 
 /**
  * A radial menu round a flag: one round button per thing the flag can do, laid
@@ -297,11 +310,22 @@ function FlagMenu({ app, viewRef, host }: { app: App; viewRef: { current: View |
       if (view && el && h && f && !f.removed) {
         const r = h.getBoundingClientRect();
         const p = view.screenOf(f.pos);
-        const R = 84; // room for the ring of buttons
-        const x = Math.max(R, Math.min(r.width - R, p.x - r.left));
-        const y = Math.max(R, Math.min(r.height - R, p.y - r.top - 6));
+        const list = app.menu?.page === 'build';
+        const Rx = list ? 20 : 84; // room for the ring of buttons, or the list beside the flag
+        const Ry = list ? 40 : 84;
+        const x = Math.max(Rx, Math.min(r.width - Rx, p.x - r.left));
+        const y = Math.max(Ry, Math.min(r.height - Ry, p.y - r.top - 6));
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
+        // the list opens to the right of the flag, or to the left where there is no room
+        el.dataset.flip = list && r.width - x < 290 ? '1' : '';
+        const card = el.querySelector<HTMLElement>('.build-list');
+        if (card) {
+          const maxH = Math.max(160, Math.min(380, r.height - 20));
+          card.style.maxHeight = `${maxH}px`;
+          const top = Math.max(-y + 10, Math.min(-maxH * 0.25, r.height - y - Math.min(maxH, card.scrollHeight) - 10));
+          card.style.top = `${top}px`;
+        }
       }
       raf = requestAnimationFrame(place);
     };
@@ -311,6 +335,35 @@ function FlagMenu({ app, viewRef, host }: { app: App; viewRef: { current: View |
   if (flag < 0) return null;
   const actions = app.flagActions(flag);
   const n = actions.length;
+  if (app.menu?.page === 'build') {
+    const options = app.buildOptions(flag);
+    return (
+      <div class="radial" ref={root} role="menu" aria-label="Build here">
+        <div class="radial-ring small" />
+        <div class="build-list">
+          <div class="build-head">
+            <button class="back" onClick={() => app.menuBack()} title="Back to the flag menu">‹ Back</button>
+            <span>Build here</span>
+          </div>
+          {options.map((o) => (
+            <button
+              key={o.type}
+              role="menuitem"
+              class={`build-row${o.enabled ? '' : ' off'}`}
+              title={o.enabled ? `Build a ${o.name.toLowerCase()} here` : `${o.name}: ${o.reason}`}
+              aria-disabled={!o.enabled}
+              onClick={() => (o.enabled ? app.buildFromMenu(o.type) : undefined)}
+            >
+              <span class="chip" style={{ background: `#${BUILDING_COLOR[o.type]!.toString(16).padStart(6, '0')}` }} />
+              <span class="name">{o.name}</span>
+              <span class="cost">{costText(o.planks, o.stones)}</span>
+              {!o.enabled && <span class="why">{o.reason}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
   return (
     <div class="radial" ref={root} role="menu" aria-label="Flag">
       <div class="radial-ring" />
@@ -363,7 +416,7 @@ function FoodSliders({ app }: { app: App }) {
       ))}
       <p class="hint">
         {kinds.length > 1
-          ? 'A mine with a bigger share is fed first; at 0 it gets no fish or bread.'
+          ? 'A mine with a bigger share is fed first; at 0 it gets no fish, bread or meat.'
           : 'Only one kind of mine so far: the slider matters once there are two.'}
       </p>
     </section>

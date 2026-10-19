@@ -1,7 +1,7 @@
 // The radial menu of a flag: what it offers, when it opens and closes, what
 // each choice does.
 import { describe, expect, it } from 'vitest';
-import { BuildingType, Dir, Game, MapObjects, Res, TerrainMap } from '@sett/sim';
+import { BuildingType, Dir, Game, MapObject, MapObjects, Res, TerrainMap, buildNeeds } from '@sett/sim';
 import { App } from '../src/app.ts';
 
 const COLS = 32;
@@ -38,7 +38,7 @@ describe('opening and closing', () => {
   it('clicking a flag with the Select tool opens its menu', () => {
     const { app, g, meadow } = world();
     app.click(...at(g, meadow));
-    expect(app.menu).toEqual({ flag: meadow });
+    expect(app.menu).toEqual({ flag: meadow, page: 'main' });
     expect(app.selection).toEqual({ kind: 'flag', index: meadow });
   });
 
@@ -53,7 +53,7 @@ describe('opening and closing', () => {
     const { app, g, meadow } = world();
     app.click(...at(g, meadow));
     app.click(...at(g, meadow));
-    expect(app.menu).toEqual({ flag: meadow });
+    expect(app.menu).toEqual({ flag: meadow, page: 'main' });
   });
 
   it('choosing another tool, or the Escape key (which selects), closes it', () => {
@@ -99,12 +99,12 @@ describe('opening and closing', () => {
 describe('what it offers', () => {
   it('a flag on meadow: a road and removing the flag, no geologist', () => {
     const { app, meadow } = world();
-    expect(ids(app, meadow)).toEqual(['road', 'demolish']);
+    expect(ids(app, meadow)).toEqual(['build', 'road', 'demolish']);
   });
 
   it('a flag on a mountain, joined to a storage by road, adds the geologist ready to go', () => {
     const { app, rock } = world();
-    expect(ids(app, rock)).toEqual(['road', 'geologist', 'demolish']);
+    expect(ids(app, rock)).toEqual(['build', 'road', 'geologist', 'demolish']);
     const geo = app.flagActions(rock).find((x) => x.id === 'geologist')!;
     expect(geo.enabled).toBe(true);
     expect(geo.reason).toBe('');
@@ -208,5 +208,129 @@ describe('what a choice does', () => {
     for (let ms = 0; ms < 1200; ms += 16) app.frame(16);
     expect(store.get('sett.save')).not.toBe(before);
     void lone;
+  });
+});
+
+describe('the Build list', () => {
+  const T = BuildingType;
+
+  it('every flag without a building offers Build; a flag with one (the castle door) does not', () => {
+    const { app, a, meadow } = world();
+    expect(ids(app, meadow)[0]).toBe('build');
+    expect(ids(app, a)).not.toContain('build');
+  });
+
+  it('lists every building with its cost, the ones that fit first', () => {
+    const { app, meadow } = world();
+    const list = app.buildOptions(meadow);
+    expect(list.length).toBe(19);
+    const firstOff = list.findIndex((o) => !o.enabled);
+    expect(firstOff).toBeGreaterThan(0);
+    for (let i = 0; i < list.length; i++) expect(list[i]!.enabled, `${list[i]!.name} at ${i}`).toBe(i < firstOff);
+    for (const o of list) {
+      const need = buildNeeds(o.type);
+      expect(o.planks).toBe(need[Res.Plank]);
+      expect(o.stones).toBe(need[Res.Stone]);
+      expect(o.name.length).toBeGreaterThan(2);
+    }
+    expect(list.map((o) => o.type)).not.toContain(T.Castle);
+    expect(new Set(list.map((o) => o.type)).size).toBe(19);
+  });
+
+  it('what fits depends on the ground: a mine on meadow does not, a lumberjack on rock does not', () => {
+    const { app, meadow, rock } = world();
+    const onMeadow = app.buildOptions(meadow);
+    expect(onMeadow.find((o) => o.type === T.Lumberjack)!.enabled).toBe(true);
+    const mine = onMeadow.find((o) => o.type === T.CoalMine)!;
+    expect(mine.enabled).toBe(false);
+    expect(mine.reason).toMatch(/mountain/);
+    const onRock = app.buildOptions(rock);
+    expect(onRock.find((o) => o.type === T.CoalMine)!.enabled).toBe(true);
+    const lj = onRock.find((o) => o.type === T.Lumberjack)!;
+    expect(lj.enabled).toBe(false);
+    expect(lj.reason).toMatch(/mountain/);
+  });
+
+  it('agrees with the placement rules exactly: an option is enabled if and only if placeBuilding would succeed', () => {
+    const { app, g, meadow, rock } = world();
+    for (const f of [meadow, rock]) {
+      for (const o of app.buildOptions(f)) {
+        const probe = structuredClone(g.serialize());
+        const copy = Game.restore(probe);
+        let ok = true;
+        try {
+          copy.placeBuilding(o.type, copy.buildSpot(f), true);
+        } catch {
+          ok = false;
+        }
+        expect(ok, `${o.name} at flag ${f}`).toBe(o.enabled);
+      }
+    }
+  });
+
+  it('Build opens the list and keeps the menu open on that page; Back returns to the ring', () => {
+    const { app, g, meadow } = world();
+    app.click(...at(g, meadow));
+    app.chooseFlagAction('build');
+    expect(app.menu).toEqual({ flag: meadow, page: 'build' });
+    app.menuBack();
+    expect(app.menu).toEqual({ flag: meadow, page: 'main' });
+  });
+
+  it('picking a building puts its site here, door on this flag, and closes the menu', () => {
+    const { app, g, meadow } = world();
+    app.click(...at(g, meadow));
+    app.chooseFlagAction('build');
+    const before = g.buildings.length;
+    app.buildFromMenu(T.Lumberjack);
+    expect(g.buildings.length).toBe(before + 1);
+    const b = g.buildings[g.buildings.length - 1]!;
+    expect(b.type).toBe(T.Lumberjack);
+    expect(b.flag).toBe(meadow);
+    expect(b.constructing).toBe(true);
+    expect(app.menu).toBeNull();
+    expect(app.toast).toBe('');
+  });
+
+  it('a building that does not fit is refused with the reason, and the menu closes', () => {
+    const { app, g, meadow } = world();
+    app.click(...at(g, meadow));
+    app.chooseFlagAction('build');
+    const before = g.buildings.length;
+    app.buildFromMenu(T.CoalMine);
+    expect(g.buildings.length).toBe(before);
+    expect(app.toast).toMatch(/mountain/);
+    expect(app.menu).toBeNull();
+  });
+
+  it('after a building stands on the flag the menu no longer offers Build', () => {
+    const { app, g, meadow } = world();
+    app.click(...at(g, meadow));
+    app.chooseFlagAction('build');
+    app.buildFromMenu(T.Lumberjack);
+    app.click(...at(g, meadow));
+    expect(ids(app, meadow)).not.toContain('build');
+  });
+
+  it('Build is greyed out when nothing fits (trees all round)', () => {
+    const { app, g } = world();
+    const lone = g.addFlag(8, 18);
+    for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+      const p = g.index(8 + dx, 18 + dy);
+      if (p !== g.flags[lone]!.pos && g.flagAtPos(p) < 0 && g.objects!.kindAt(p) === MapObject.None) g.objects!.set(p, MapObject.Tree);
+    }
+    const build = app.flagActions(lone).find((x) => x.id === 'build')!;
+    expect(build.enabled).toBe(false);
+    expect(build.reason).toMatch(/nothing can be built/);
+    app.click(...at(g, lone));
+    app.chooseFlagAction('build');
+    expect(app.menu).toBeNull(); // greyed: it did not open the list
+    expect(app.toast).toMatch(/Can't do that/);
+  });
+
+  it('picking is a command, saved soon after, and with no menu open it does nothing', () => {
+    const { app } = world();
+    app.buildFromMenu(T.Lumberjack);
+    expect(app.game.buildings.length).toBe(1);
   });
 });

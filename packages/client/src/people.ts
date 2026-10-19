@@ -22,6 +22,8 @@ export type Trade =
   | 'smelter'
   | 'smith'
   | 'geologist'
+  | 'swineherd'
+  | 'butcher'
   | 'waterman';
 
 export type Action = 'walk' | 'idle' | 'work';
@@ -64,6 +66,8 @@ export function tradeOf(type: BuildingType): Trade | null {
     case BuildingType.IronSmelter:
     case BuildingType.GoldSmelter: return 'smelter';
     case BuildingType.Toolmaker: return 'smith';
+    case BuildingType.PigFarm: return 'swineherd';
+    case BuildingType.Butcher: return 'butcher';
     case BuildingType.Well: return 'waterman';
     default: return null; // stores have no worker
   }
@@ -144,6 +148,8 @@ const LOOK: Record<Trade, Look> = {
   smelter: { tunic: 0x8a3a24, hat: 0x2a2a2a, hatKind: 'band' },
   smith: { tunic: 0x5a4636, hat: 0x2a2a2a, hatKind: 'cap' },
   geologist: { tunic: 0x8a7d4e, hat: 0x6a4e2a, hatKind: 'straw' },
+  swineherd: { tunic: 0x6f8a4a, hat: 0x8a6a3a, hatKind: 'straw' },
+  butcher: { tunic: 0xf2f2f2, hat: 0xffffff, hatKind: 'tall' },
   waterman: { tunic: 0x3aa6c8, hat: 0x2a6a88, hatKind: 'cap' },
 };
 
@@ -169,6 +175,7 @@ function drawTool(g: Graphics, trade: Trade, hand: Pt2, angle: number, f: number
     }
     case 'stonecutter':
     case 'builder':
+    case 'butcher':
     case 'geologist':
     case 'smith':
     case 'miner': {

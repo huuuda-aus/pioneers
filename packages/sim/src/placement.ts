@@ -25,6 +25,7 @@ export function buildingSize(type: BuildingType): BuildingSize {
     case BuildingType.IronSmelter:
     case BuildingType.GoldSmelter:
     case BuildingType.Toolmaker:
+    case BuildingType.Butcher:
       return BuildingSize.Small;
     case BuildingType.Sawmill:
     case BuildingType.Storage:
@@ -32,6 +33,7 @@ export function buildingSize(type: BuildingType): BuildingSize {
     case BuildingType.Farm:
     case BuildingType.Mill:
     case BuildingType.Baker:
+    case BuildingType.PigFarm:
       return BuildingSize.Large;
   }
 }

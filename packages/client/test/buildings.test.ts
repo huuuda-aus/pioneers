@@ -66,7 +66,7 @@ function extent(calls: Call[]): { minX: number; maxX: number; minY: number; maxY
 const T = BuildingType;
 const ALL = Object.values(T).filter((v): v is number => typeof v === 'number');
 const sizeOf = (t: BuildingType): { w: number; h: number } =>
-  t === T.Castle ? { w: 62, h: 46 } : [T.Sawmill, T.Storage, T.Farm, T.Mill, T.Baker].includes(t) ? { w: 58, h: 34 } : { w: 34, h: 24 };
+  t === T.Castle ? { w: 62, h: 46 } : [T.Sawmill, T.Storage, T.Farm, T.Mill, T.Baker, T.PigFarm].includes(t) ? { w: 58, h: 34 } : { w: 34, h: 24 };
 
 function art(type: BuildingType, over: Partial<Art> = {}): Art {
   return { type, cx: 500, cy: 400, ...sizeOf(type), time: 3.7, working: false, progress: 1, seed: 5, ore: 1, ...over };
@@ -120,7 +120,7 @@ describe('every building is drawn', () => {
 });
 
 describe('life', () => {
-  const MOVERS = [T.Lumberjack, T.Sawmill, T.Stonecutter, T.Baker, T.Mill, T.Well, T.IronSmelter, T.GoldSmelter, T.Toolmaker, T.Farm, T.StoneMine, T.CoalMine];
+  const MOVERS = [T.PigFarm, T.Butcher, T.Lumberjack, T.Sawmill, T.Stonecutter, T.Baker, T.Mill, T.Well, T.IronSmelter, T.GoldSmelter, T.Toolmaker, T.Farm, T.StoneMine, T.CoalMine];
 
   it('a working building moves: two moments differ', () => {
     for (const type of MOVERS) {

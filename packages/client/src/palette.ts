@@ -22,6 +22,9 @@ export const RES_COLOR: Record<number, number> = {
   [Res.Scythe]: 0x84939f,
   [Res.Saw]: 0xa9b6c2,
   [Res.Hammer]: 0x6a7a89,
+  [Res.Cleaver]: 0x9aa7b4,
+  [Res.Pig]: 0xf0a8b8,
+  [Res.Meat]: 0xc4544a,
 };
 
 /** The flecks that show ore under a mountain, by kind (index OreKind). */
@@ -46,6 +49,8 @@ export const BUILDING_COLOR: Record<number, number> = {
   [BuildingType.IronSmelter]: 0x7a8794,
   [BuildingType.GoldSmelter]: 0xd4a62a,
   [BuildingType.Toolmaker]: 0x5f7a96,
+  [BuildingType.PigFarm]: 0xb8604e,
+  [BuildingType.Butcher]: 0xc23a3a,
 };
 
 export const BUILDING_LABEL: Record<number, string> = {
@@ -67,6 +72,8 @@ export const BUILDING_LABEL: Record<number, string> = {
   [BuildingType.IronSmelter]: 'Is',
   [BuildingType.GoldSmelter]: 'Gs',
   [BuildingType.Toolmaker]: 'Tm',
+  [BuildingType.PigFarm]: 'Pf',
+  [BuildingType.Butcher]: 'Bt',
 };
 
 /** The letter over a new worker's head as he walks to his building. */
@@ -87,6 +94,8 @@ export const WORKER_LETTER: Record<number, string> = {
   [BuildingType.IronSmelter]: 'Is',
   [BuildingType.GoldSmelter]: 'Gs',
   [BuildingType.Toolmaker]: 'Tm',
+  [BuildingType.PigFarm]: 'Pf',
+  [BuildingType.Butcher]: 'Bt',
 };
 
 export const BUILDING_NAME: Record<number, string> = {
@@ -108,6 +117,8 @@ export const BUILDING_NAME: Record<number, string> = {
   [BuildingType.IronSmelter]: 'Iron smelter',
   [BuildingType.GoldSmelter]: 'Gold smelter',
   [BuildingType.Toolmaker]: 'Toolmaker',
+  [BuildingType.PigFarm]: 'Pig farm',
+  [BuildingType.Butcher]: 'Butcher',
 };
 
 /** Terrain colours; grass and mountain blend with height. */

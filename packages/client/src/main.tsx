@@ -5,7 +5,7 @@ import { Root } from './ui.tsx';
 import './style.css';
 
 const app = new App('new', browserStorage());
-app.screen = 'menu';
+app.startScreen();
 render(<Root app={app} />, document.getElementById('app')!);
 
 // Handy for poking at the sim from the browser console.

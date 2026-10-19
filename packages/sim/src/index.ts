@@ -1,5 +1,5 @@
 export * from './types.ts';
-export { Game, harvestKindOf } from './game.ts';
+export { Game, buildNeeds, harvestKindOf } from './game.ts';
 export { SAVE_VERSION, type SaveData } from './save.ts';
 export {
   FIELD_RADIUS,

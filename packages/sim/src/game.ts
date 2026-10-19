@@ -98,6 +98,8 @@ const GLYPH: Record<BuildingType, string> = {
   [BuildingType.IronSmelter]: 'X',
   [BuildingType.GoldSmelter]: 'Y',
   [BuildingType.Toolmaker]: 'T',
+  [BuildingType.PigFarm]: 'Q',
+  [BuildingType.Butcher]: 'Z',
 };
 
 const zeros = (): number[] => new Array<number>(RES_COUNT).fill(0);
@@ -116,6 +118,13 @@ const MINE_OUT: Partial<Record<BuildingType, Res>> = {
   [BuildingType.IronMine]: Res.IronOre,
   [BuildingType.GoldMine]: Res.GoldOre,
 };
+
+/** The materials a building of this type needs to be built, by resource (a list indexed by Res). */
+export function buildNeeds(type: BuildingType): number[] {
+  const probe = { type, need: zeros() } as Building;
+  setNeeds(probe);
+  return probe.need;
+}
 
 /** What each building needs to be built. */
 function setNeeds(b: Building): void {
@@ -166,6 +175,14 @@ function setNeeds(b: Building): void {
     case BuildingType.Toolmaker:
       b.need[Res.Plank] = 3;
       b.need[Res.Stone] = 2;
+      break;
+    case BuildingType.PigFarm:
+      b.need[Res.Plank] = 3;
+      b.need[Res.Stone] = 1;
+      break;
+    case BuildingType.Butcher:
+      b.need[Res.Plank] = 2;
+      b.need[Res.Stone] = 1;
       break;
     case BuildingType.Castle:
       break; // never built
@@ -234,6 +251,18 @@ function initOperation(b: Building): void {
     case BuildingType.GoldSmelter:
       b.inGroups = [[Res.GoldOre], [Res.Coal]];
       b.out = Res.Gold;
+      b.maxIn = 4;
+      b.period = 600;
+      break;
+    case BuildingType.PigFarm:
+      b.inGroups = [[Res.Wheat], [Res.Water]];
+      b.out = Res.Pig;
+      b.maxIn = 4;
+      b.period = 800;
+      break;
+    case BuildingType.Butcher:
+      b.inGroups = [[Res.Pig]];
+      b.out = Res.Meat;
       b.maxIn = 4;
       b.period = 600;
       break;
@@ -932,6 +961,11 @@ export class Game {
     let fi = this.flagAt[check.flagPos]!;
     if (fi < 0) fi = this.addFlag(check.flagPos % this.cols, Math.floor(check.flagPos / this.cols));
     return this.addBuilding(type, fi, construct);
+  }
+
+  /** The map point where a building whose door is this flag would stand (up-left of the flag). */
+  buildSpot(flag: number): number {
+    return this.move(this.flags[flag]!.pos, Dir.UpLeft);
   }
 
   /** Put starting goods into a building's stock (counted as created). */
@@ -1866,7 +1900,7 @@ export class Game {
     g.settlers = d.settlers ?? false;
     if (d.foodShare) g.foodShare = d.foodShare.slice();
     g.tools = d.tools ?? false;
-    if (d.toolShare) g.toolShare = d.toolShare.slice();
+    if (d.toolShare) g.toolShare = TOOL_KINDS.map((_, i) => d.toolShare![i] ?? 5); // saves from before a tool existed ask 5 for it
     g.geologists = d.geologists ?? [];
     g.nextGeologist = d.nextGeologist ?? g.geologists.length;
     g.flags = d.flags;

@@ -2,7 +2,7 @@
 // and selection, and every command that changes the sim. The renderer and the
 // panels only read from here.
 
-import { BuildingType, Game, MapObject, ORE_NAMES, SIGN_EMPTY, type OreKind, type Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
+import { BuildingType, Game, MapObject, ORE_NAMES, SIGN_EMPTY, buildNeeds, type OreKind, Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
 import { BUILDING_NAME } from './palette.ts';
 import { type KV, readSave, writeSave } from './persistence.ts';
 import { makeScenario, type ScenarioId } from './scenarios.ts';
@@ -34,6 +34,8 @@ export type Tool =
   | 'ironsmelter'
   | 'goldsmelter'
   | 'toolmaker'
+  | 'pigfarm'
+  | 'butcher'
   | 'storage'
   | 'geologist'
   | 'demolish';
@@ -45,14 +47,49 @@ export type DemolishTarget =
 
 /** One thing a flag's radial menu can do. */
 export interface FlagAction {
-  id: 'road' | 'geologist' | 'demolish';
+  id: 'build' | 'road' | 'geologist' | 'demolish';
   label: string;
   enabled: boolean;
   /** Why it is greyed out; empty when enabled. */
   reason: string;
 }
 
+/** One building the Build list of a flag can offer. */
+export interface BuildOption {
+  type: BuildingType;
+  name: string;
+  enabled: boolean;
+  /** Why it cannot be built here; empty when it can. */
+  reason: string;
+  /** Planks and stone it needs. */
+  planks: number;
+  stones: number;
+}
+
 export type Selection = { kind: 'flag' | 'building' | 'road'; index: number } | null;
+
+/** The order buildings are listed in: the economy's, as in the toolbar. */
+const BUILD_ORDER: BuildingType[] = [
+  BuildingType.Lumberjack,
+  BuildingType.Forester,
+  BuildingType.Sawmill,
+  BuildingType.Stonecutter,
+  BuildingType.Storage,
+  BuildingType.Fisher,
+  BuildingType.Farm,
+  BuildingType.Well,
+  BuildingType.Mill,
+  BuildingType.Baker,
+  BuildingType.PigFarm,
+  BuildingType.Butcher,
+  BuildingType.StoneMine,
+  BuildingType.CoalMine,
+  BuildingType.IronMine,
+  BuildingType.GoldMine,
+  BuildingType.IronSmelter,
+  BuildingType.Toolmaker,
+  BuildingType.GoldSmelter,
+];
 
 const SITE_TOOLS: Partial<Record<Tool, BuildingType>> = {
   lumberjack: BuildingType.Lumberjack,
@@ -71,6 +108,8 @@ const SITE_TOOLS: Partial<Record<Tool, BuildingType>> = {
   ironsmelter: BuildingType.IronSmelter,
   goldsmelter: BuildingType.GoldSmelter,
   toolmaker: BuildingType.Toolmaker,
+  pigfarm: BuildingType.PigFarm,
+  butcher: BuildingType.Butcher,
   storage: BuildingType.Storage,
 };
 
@@ -81,7 +120,7 @@ export class App {
   tool: Tool = 'select';
   selection: Selection = null;
   /** The flag whose radial menu is open (Select tool, click on a flag). */
-  menu: { flag: number } | null = null;
+  menu: { flag: number; page: 'main' | 'build' } | null = null;
   roadStart = -1; // flag index while the road tool has a first click
   hover: { x: number; y: number } | null = null;
   toast = '';
@@ -129,6 +168,11 @@ export class App {
   /** A game to go back to: a saved one, or one begun in this session. */
   get canContinue(): boolean {
     return this.lastSaved !== null || this.game.tick > 0;
+  }
+
+  /** On page load: the main screen only when there is no game to carry on with; with a saved game, play straight on. */
+  startScreen(): void {
+    this.screen = this.canContinue ? 'game' : 'menu';
   }
 
   openMenu(): void {
@@ -239,7 +283,13 @@ export class App {
   /** What the menu of a flag offers: a road from it, a geologist (only where there is a mountain), demolishing it. */
   flagActions(flag: number): FlagAction[] {
     const g = this.game;
-    const out: FlagAction[] = [{ id: 'road', label: 'Road', enabled: true, reason: '' }];
+    const out: FlagAction[] = [];
+    if (g.flags[flag]!.building < 0) {
+      const options = this.buildOptions(flag);
+      const any = options.find((o) => o.enabled);
+      out.push({ id: 'build', label: 'Build', enabled: !!any, reason: any ? '' : 'nothing can be built at this flag' });
+    }
+    out.push({ id: 'road', label: 'Road', enabled: true, reason: '' });
     if (g.flagByMountain(flag)) {
       const c = g.checkGeologist(flag);
       out.push({ id: 'geologist', label: 'Geologist', enabled: c.ok, reason: c.reason });
@@ -247,6 +297,40 @@ export class App {
     const d = g.checkDemolishFlag(flag);
     out.push({ id: 'demolish', label: 'Remove flag', enabled: d.ok, reason: d.reason });
     return out;
+  }
+
+  /** Every building, with whether it can stand with this flag as its door, and why not if it cannot. Buildable ones come first. */
+  buildOptions(flag: number): BuildOption[] {
+    const g = this.game;
+    const spot = g.buildSpot(flag);
+    const out: BuildOption[] = [];
+    for (const type of BUILD_ORDER) {
+      const c = checkBuilding(g, type, spot);
+      const need = buildNeeds(type);
+      out.push({ type, name: BUILDING_NAME[type]!, enabled: c.ok, reason: c.reason, planks: need[Res.Plank]!, stones: need[Res.Stone]! });
+    }
+    return out.sort((a, b) => Number(b.enabled) - Number(a.enabled));
+  }
+
+  /** Back from the Build list to the ring. */
+  menuBack(): void {
+    if (this.menu) this.menu = { flag: this.menu.flag, page: 'main' };
+    this.changed();
+  }
+
+  /** The player picked a building in the Build list: a site goes up here, its door on this flag. */
+  buildFromMenu(type: BuildingType): void {
+    const m = this.menu;
+    if (!m) return;
+    this.menu = null;
+    try {
+      this.game.placeBuilding(type, this.game.buildSpot(m.flag), true);
+      this.commanded();
+      this.say('');
+    } catch (e) {
+      this.say(e instanceof Error ? e.message : String(e));
+    }
+    this.changed();
   }
 
   closeMenu(): void {
@@ -261,6 +345,11 @@ export class App {
     if (!m) return;
     const fi = m.flag;
     const action = this.flagActions(fi).find((x) => x.id === id);
+    if (id === 'build' && action?.enabled) {
+      this.menu = { flag: fi, page: 'build' }; // stays open, as a list
+      this.changed();
+      return;
+    }
     this.menu = null;
     if (!action) return;
     if (!action.enabled) {
@@ -529,7 +618,7 @@ export class App {
     if (fi >= 0) {
       const f = g.flags[fi]!;
       this.selection = f.building >= 0 ? { kind: 'building', index: f.building } : { kind: 'flag', index: fi };
-      this.menu = { flag: fi };
+      this.menu = { flag: fi, page: 'main' };
       return;
     }
     // A road tile: find the road that covers it.

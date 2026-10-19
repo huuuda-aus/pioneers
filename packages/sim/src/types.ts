@@ -7,20 +7,20 @@ export enum Dir { None = -1, Right, DownRight, Down, Left, UpLeft, Up }
 export const DIRS = 6;
 export const reverse = (d: Dir): Dir => ((d + 3) % DIRS) as Dir;
 
-export enum Res { None = -1, Lumber, Plank, Stone, Fish, Wheat, Flour, Water, Bread, Coal, IronOre, GoldOre, Iron, Gold, Axe, Pick, Shovel, Rod, Scythe, Saw, Hammer }
-export const RES_COUNT = 20;
+export enum Res { None = -1, Lumber, Plank, Stone, Fish, Wheat, Flour, Water, Bread, Coal, IronOre, GoldOre, Iron, Gold, Axe, Pick, Shovel, Rod, Scythe, Saw, Hammer, Cleaver, Pig, Meat }
+export const RES_COUNT = 23;
 /** The resources the C++ reference models; the parity fingerprint covers only these. */
 export const PARITY_RES = 3;
-export const RES_NAMES = ['lumber', 'plank', 'stone', 'fish', 'wheat', 'flour', 'water', 'bread', 'coal', 'iron ore', 'gold ore', 'iron', 'gold', 'axe', 'pick', 'shovel', 'rod', 'scythe', 'saw', 'hammer'] as const;
-export const FLAG_PRIO = [1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]; // pickup priority per resource
+export const RES_NAMES = ['lumber', 'plank', 'stone', 'fish', 'wheat', 'flour', 'water', 'bread', 'coal', 'iron ore', 'gold ore', 'iron', 'gold', 'axe', 'pick', 'shovel', 'rod', 'scythe', 'saw', 'hammer', 'cleaver', 'pig', 'meat'] as const;
+export const FLAG_PRIO = [1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]; // pickup priority per resource
 /** What a mine will eat: any one of these counts as a unit of food. */
-export const FOOD: readonly Res[] = [Res.Fish, Res.Bread];
+export const FOOD: readonly Res[] = [Res.Fish, Res.Bread, Res.Meat];
 /** Top of a mine's food share (0 = it gets none). */
 export const FOOD_MAX = 10;
 
 /** The tools a toolmaker makes, one kind per trade. */
-export const TOOL_KINDS: readonly Res[] = [Res.Axe, Res.Pick, Res.Shovel, Res.Rod, Res.Scythe, Res.Saw, Res.Hammer];
-export const isTool = (r: Res): boolean => r >= Res.Axe && r <= Res.Hammer;
+export const TOOL_KINDS: readonly Res[] = [Res.Axe, Res.Pick, Res.Shovel, Res.Rod, Res.Scythe, Res.Saw, Res.Hammer, Res.Cleaver];
+export const isTool = (r: Res): boolean => r >= Res.Axe && r <= Res.Cleaver;
 /** Top of a toolmaker slider (0 = never make that tool). */
 export const TOOL_MAX = 10;
 
@@ -138,6 +138,8 @@ export enum BuildingType {
   IronSmelter,
   GoldSmelter,
   Toolmaker,
+  PigFarm,
+  Butcher,
 }
 
 /** The tool a worker of this building needs, or None (a store, a carrier, a well, a mill, a baker need none). */
@@ -156,6 +158,7 @@ export function toolFor(type: BuildingType): Res {
     case BuildingType.IronSmelter:
     case BuildingType.GoldSmelter:
     case BuildingType.Toolmaker: return Res.Hammer;
+    case BuildingType.Butcher: return Res.Cleaver;
     default: return Res.None;
   }
 }
@@ -242,7 +245,7 @@ export function priority(b: Building, r: Res): number {
   for (const x of group) total += b.stock[x]! + b.requested[x]!;
   if (total >= b.maxIn) return 0;
   const base = Math.floor((255 * (b.maxIn - total)) / b.maxIn);
-  if (r !== Res.Fish && r !== Res.Bread) return base;
+  if (!FOOD.includes(r)) return base;
   // the food slider: a mine with a bigger share is served first, one with none is not served
   const w = b.foodWeight;
   return w >= FOOD_MAX ? base : w <= 0 ? 0 : Math.max(1, Math.floor((base * w) / FOOD_MAX));

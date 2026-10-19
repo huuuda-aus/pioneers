@@ -43,6 +43,7 @@ const START_STOCK: [Res, number][] = [
   [Res.Scythe, 2],
   [Res.Saw, 2],
   [Res.Hammer, 2],
+  [Res.Cleaver, 2],
 ];
 
 function level(cx: number, cy: number, radius: number): TerrainMap {

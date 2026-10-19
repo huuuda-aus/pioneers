@@ -119,3 +119,53 @@ describe('older saves', () => {
     expect(b.game.settlers).toBe(true);
   });
 });
+
+describe('page load', () => {
+  it('with a saved game it plays straight on, no main screen', () => {
+    const store = new Mem();
+    const first = new App('new', store);
+    for (let ms = 0; ms < 3000; ms += 16) first.frame(16);
+    first.saveNow();
+    const tick = first.game.tick;
+    const app = new App('new', store);
+    app.startScreen();
+    expect(app.screen).toBe('game');
+    expect(app.game.tick).toBe(tick);
+    for (let ms = 0; ms < 500; ms += 16) app.frame(16);
+    expect(app.game.tick).toBeGreaterThan(tick); // and it runs
+  });
+
+  it('with nothing saved it shows the main screen, and nothing runs behind it', () => {
+    const app = new App('new', new Mem());
+    app.startScreen();
+    expect(app.screen).toBe('menu');
+    for (let ms = 0; ms < 500; ms += 16) app.frame(16);
+    expect(app.game.tick).toBe(0);
+  });
+
+  it('with no storage at all it shows the main screen', () => {
+    const app = new App('new', null);
+    app.startScreen();
+    expect(app.screen).toBe('menu');
+  });
+
+  it('a damaged save shows the main screen with the reason', () => {
+    const store = new Mem();
+    store.data.set(SAVE_KEY, '{nope');
+    const app = new App('new', store);
+    app.startScreen();
+    expect(app.screen).toBe('menu');
+    expect(app.toast).toMatch(/could not be loaded/);
+  });
+
+  it('New game is still one click away from the Menu button', () => {
+    const store = new Mem();
+    const first = new App('new', store);
+    first.saveNow();
+    const app = new App('new', store);
+    app.startScreen();
+    app.openMenu();
+    expect(app.screen).toBe('menu');
+    expect(app.canContinue).toBe(true);
+  });
+});

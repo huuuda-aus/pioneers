@@ -378,6 +378,23 @@ function rails(c: Ctx, a: Pt, b: Pt): void {
   }
 }
 
+/** A pig: pink body, snout, flopped ears, a curly tail. `bob` in [-1, 1] makes it trot a little. */
+function pig(c: Ctx, x: number, y: number, face: 1 | -1, bob: number, size = 1): void {
+  const s = size;
+  c.ellipse(x + 1, y + 1, 7 * s, 2.6 * s, 0x000000, 0.22);
+  const by = y - 4.5 * s - Math.abs(bob) * 0.8;
+  c.ellipse(x, by, 7 * s, 4.4 * s, 0xf0a8b8);
+  c.ellipse(x + 1.2 * s * face, by + 1.4 * s, 5.2 * s, 2.6 * s, 0xe38aa0, 0.5);
+  c.circle(x + 6 * s * face, by - 1 * s, 3.1 * s, 0xf4b5c4);
+  c.ellipse(x + 8.6 * s * face, by - 0.2 * s, 1.5 * s, 1.2 * s, 0xe0788f);
+  c.g.poly([x + 4.6 * s * face, by - 3.4 * s, x + 6.2 * s * face, by - 6 * s, x + 7.4 * s * face, by - 2.6 * s]).fill({ color: 0xe98fa5, alpha: c.a });
+  c.circle(x + 6.8 * s * face, by - 1.8 * s, 0.7 * s, 0x2a1a1a);
+  const step = bob * 1.2 * s;
+  for (const [dx, k] of [[-4, 1], [-1.6, -1], [2, 1], [4.4, -1]] as const) c.rect(x + dx * s - 0.7, by + 3 * s, 1.5 * s, 2.6 * s + k * step * 0.5, 0xd98aa0);
+  c.seg({ x: x - 6.6 * s * face, y: by - 0.6 * s }, { x: x - 8.6 * s * face, y: by - 2.4 * s }, 0xe38aa0, 1.2 * s);
+  c.circle(x - 8.8 * s * face, by - 2.4 * s, 1 * s, 0xe38aa0, 0.9);
+}
+
 // ---- the buildings ---------------------------------------------------------
 
 function lumberjack(c: Ctx): void {
@@ -750,6 +767,79 @@ function smelter(c: Ctx, metal: number): void {
   else c.ellipse(c.cx + c.hw + 4, c.cy + 11.4, 3.6, 1.4, metal);
 }
 
+function pigFarm(c: Ctx): void {
+  // a barn behind, a pen of pigs in front, a trough, a haystack
+  haystack(c, c.cx + c.hw + 3, c.cy + 12);
+  walls(c, 0xa5604a, { texture: 'boards', footing: 0.12 });
+  gable(c, 0x6a4036, 17, { shingles: 7, gable: 0x8a5442, overhang: 4 });
+  doorAt(c, 'l', 0.3, 0.3, 0.64, 0x4a2c20);
+  windowAt(c, 'r', 0.5, 0.62, 0.16, false);
+  // a hay-loft hatch under the gable
+  const hatch = c.right(0.5, 0.86);
+  c.rect(hatch.x - 3.5, hatch.y - 3, 7, 6, 0x2a1a12);
+  // the pen: a mud patch and a fence round it
+  const px = c.cx - c.hw + 4;
+  const py = c.cy + 19;
+  c.g.poly([px - 20, py, px, py - 10, px + 20, py, px, py + 10]).fill({ color: 0x6f5238, alpha: c.a });
+  c.g.poly([px - 12, py + 1, px - 2, py - 4, px + 8, py + 1, px - 2, py + 6]).fill({ color: 0x5a422c, alpha: c.a * 0.8 });
+  fence(c, { x: px - 22, y: py }, { x: px, y: py + 11 }, 5);
+  fence(c, { x: px, y: py + 11 }, { x: px + 22, y: py }, 5);
+  // the trough
+  c.rect(px + 6, py - 2, 9, 3, 0x7a5a38);
+  c.rect(px + 7, py - 3, 7, 1.4, c.working ? 0xd8c070 : 0x4d8aa8);
+  // pigs trot about the pen (always a little, more when the farm is working)
+  const t = c.t * (c.working ? 1.0 : 0.35);
+  for (let i = 0; i < 3; i++) {
+    const ph = t + i * 2.1 + c.seed;
+    const x = px - 10 + i * 9 + Math.sin(ph * 0.9) * 4;
+    const y = py + 2 + (i % 2) * 4 + Math.cos(ph * 0.7) * 1.6;
+    pig(c, x, y, Math.cos(ph * 0.9) > 0 ? 1 : -1, c.working ? Math.sin(ph * 6) : Math.sin(ph * 2) * 0.3, 0.85 + 0.1 * i);
+  }
+  chimney(c, c.cx + 10, c.cy - c.h - 6, 9, 5, 0x8a5a48);
+  smoke(c, c.cx + 10, c.cy - c.h - 15, false);
+}
+
+function butcher(c: Ctx): void {
+  walls(c, 0xe0d2bc, { texture: 'plaster', footing: 0.14 });
+  gable(c, 0xa23a32, 14, { shingles: 6, gable: 0xdccdb6, flip: true });
+  // a striped awning over the shop front, with the counter beneath
+  const a0 = c.left(0.06, 0.62);
+  const a1 = c.left(0.94, 0.62);
+  for (let i = 0; i < 6; i++) {
+    const u0 = i / 6;
+    const u1 = (i + 1) / 6;
+    const p0 = { x: a0.x + (a1.x - a0.x) * u0, y: a0.y + (a1.y - a0.y) * u0 };
+    const p1 = { x: a0.x + (a1.x - a0.x) * u1, y: a0.y + (a1.y - a0.y) * u1 };
+    c.g.poly([p0.x, p0.y, p1.x, p1.y, p1.x - 3, p1.y + 6, p0.x - 3, p0.y + 6]).fill({ color: i % 2 ? 0xf2f2f2 : 0xc23a3a, alpha: c.a });
+  }
+  const counter = c.quad('l', 0.12, 0.88, 0, 0.3);
+  c.fill(counter, 0x6a4a30);
+  c.fill(c.quad('l', 0.12, 0.88, 0.3, 0.34), 0x9a7a52);
+  doorAt(c, 'r', 0.35, 0.22, 0.58, 0x4a2c20);
+  windowAt(c, 'r', 0.75, 0.58, 0.16, c.working);
+  // sausages and a ham hung from the awning
+  for (let i = 0; i < 4; i++) {
+    const x = a0.x + (a1.x - a0.x) * (0.18 + i * 0.22) - 3;
+    const y = a0.y + (a1.y - a0.y) * (0.18 + i * 0.22) + 6;
+    c.seg({ x, y }, { x, y: y + 4 }, 0x3a2a1a, 0.9);
+    c.ellipse(x, y + 8, 2, 4.2 + (i % 2), i % 2 ? 0xb3402f : 0xc4544a);
+  }
+  // a chopping block with a cleaver, and a sign
+  const bx = c.cx + c.hw + 5;
+  const by = c.cy + 10;
+  c.ellipse(bx, by + 1, 7, 3, 0x000000, 0.25);
+  c.rect(bx - 5, by - 7, 10, 8, 0x8a6035);
+  c.ellipse(bx, by - 7, 5, 2.2, 0xd2a972);
+  const chop = c.working ? Math.abs(Math.sin(c.t * 8)) : 0;
+  c.seg({ x: bx + 1, y: by - 9 - chop * 6 }, { x: bx + 7, y: by - 12 - chop * 6 }, 0x6b4a2b, 1.6);
+  c.g.poly([bx + 5, by - 14 - chop * 6, bx + 11, by - 12 - chop * 6, bx + 10, by - 8 - chop * 6, bx + 5, by - 9 - chop * 6]).fill({ color: 0xc4cbd2, alpha: c.a });
+  c.seg({ x: c.cx - c.hw - 5, y: c.cy + 8 }, { x: c.cx - c.hw - 5, y: c.cy - 12 }, 0x6b4a2b, 1.6);
+  c.rect(c.cx - c.hw - 11, c.cy - 16, 12, 8, 0xe0d2bc);
+  c.ellipse(c.cx - c.hw - 5, c.cy - 12, 3.4, 2.4, 0xc4544a);
+  chimney(c, c.cx + 8, c.cy - c.h - 7, 11, 5, 0x9a6a58);
+  smoke(c, c.cx + 8, c.cy - c.h - 18, c.working);
+}
+
 function toolmaker(c: Ctx): void {
   anvil(c, c.cx - c.hw - 3, c.cy + 12);
   walls(c, 0x9a8264, { texture: 'boards', footing: 0.12 });
@@ -860,6 +950,8 @@ export function drawBuildingArt(g: Graphics, art: Art): void {
       case BuildingType.IronSmelter: return smelter(cc, 0xaab4c4);
       case BuildingType.GoldSmelter: return smelter(cc, 0xf2c744);
       case BuildingType.Toolmaker: return toolmaker(cc);
+      case BuildingType.PigFarm: return pigFarm(cc);
+      case BuildingType.Butcher: return butcher(cc);
       default:
         if (MINES.has(art.type)) return mineAt(cc, art.ore ?? 1);
         return walls(cc, 0x999999, { texture: 'boards' }, cc.h, true);

@@ -30,7 +30,7 @@ pnpm typecheck
 pnpm build          # static site in packages/client/dist
 ```
 
-The page opens on a **main screen** with *New game* and *Continue game*. Continue is
+The page opens on a **main screen** with *New game* and *Continue game* when there is no saved game; with one, you play straight on (the *Menu* button brings the screen back). Continue is
 off until there is a game to return to (a saved one, or one begun this session);
 New game asks before replacing a saved game. Nothing runs or is saved while the screen
 is up. The *Menu* button in the top bar returns to it (and saves first).
@@ -85,10 +85,12 @@ them. (There is only ever one castle, and it can't be built.)
   game goes on. One slot, one tab: two tabs overwrite each other. The camera, the
   selected tool and the selection are not saved.
 - **Food and mining**: as in the original, only **mines eat**; carriers and every other
-  worker never do. A mine uses one fish *or* bread per unit it digs, and stops without. Fish
+  worker never do. A mine uses one fish, bread *or* meat per unit it digs, and stops without. Fish
   come from a *fisher* (within 5 steps of water, may stand at the shore, the lake never runs
   dry); bread from a *baker* (flour from a *mill*, wheat from a *farm*, plus water from a
-  *well*, one unit of each per loaf). A building can have several inputs, and an input can
+  *well*, one unit of each per loaf); meat from a *butcher*, who turns the pigs of a *pig farm*
+  (one wheat and one water per pig) into meat, one for one. The wheat is shared: mill and pig
+  farm both ask for it. A building can have several inputs, and an input can
   be a group of interchangeable goods (`Building.inGroups`); the baker waits until it has
   all of them, and a mine counts fish and bread together towards what it will stock.
   The *Food and mining* scenario has the whole chain built. The C++ fingerprint covers only
@@ -116,9 +118,9 @@ them. (There is only ever one castle, and it can't be built.)
   loads with none. TypeScript only.
 - **Tools** (`game.tools`, on in the client's games): every worker needs the tool of his
   trade, taken from a storage when he is sent out and handed back when his building is
-  demolished. Seven kinds (`TOOL_KINDS`): axe (lumberjack), pick (stonecutter and all mines),
+  demolished. Eight kinds (`TOOL_KINDS`): axe (lumberjack), pick (stonecutter and all mines),
   shovel (forester), rod (fisher), scythe (farm), saw (sawmill), hammer (smelters and the
-  toolmaker); wells, mills, bakers, storages and carriers need none (`toolFor`). A finished
+  toolmaker), cleaver (butcher); wells, mills, bakers, pig farms, storages and carriers need none (`toolFor`). A finished
   building whose worker finds his tool in no storage by road waits ("Waiting for a rod", and
   the Economy panel shows it under *waiting*), and sets out the moment one turns up. The
   **toolmaker** makes one tool from one iron and one plank. *Which* tool: each kind has a
@@ -158,7 +160,7 @@ them. (There is only ever one castle, and it can't be built.)
   style. The picture is built only when roads, flags or buildings change. Carriers and walking people
   follow the same curve, not the straight steps. Pure geometry, tested (edge sides, widths, smoothness,
   determinism, normals).
-- **Buildings** (`buildings.ts`): each of the 18 buildings is drawn from vector shapes in the ground's
+- **Buildings** (`buildings.ts`): each of the 20 buildings is drawn from vector shapes in the ground's
   isometric view, from shared pieces (walls of boards, logs, stone, brick or plaster on a stone footing;
   gabled and hipped roofs with shingles; doors, windows with lit glass, chimneys) plus its own trade's props
   and life. Lumberjack: log cabin, chopping block with a swinging axe, log pile. Forester: mossy hut,
@@ -167,7 +169,7 @@ them. (There is only ever one castle, and it can't be built.)
   hoist, barrels and crates. Castle: gatehouse with portcullis, arrow slits, two cone-roofed towers and
   waving banners. Fisher: hut, drying net, upturned boat, a rod. Farm: half-timbered farmhouse, haystack,
   fence, wheat. Well: stone ring, roof, rope and a bobbing bucket. Mill: cottage with four turning sails and
-  flour dust. Baker: brick house, oven chimney, a stall of loaves. The four mines: a hillside with a
+  flour dust. Baker: brick house, oven chimney, a stall of loaves. Pig farm: a red barn with a fenced mud pen where pink pigs trot about, a trough and a haystack. Butcher: a shop with a striped awning, hanging sausages, a chopping block with a cleaver and a sign. The four mines: a hillside with a
   timbered entrance, lantern, rails and a cart of their ore. Smelters: furnace with a flickering glow,
   tall chimney, ingots of their metal. Toolmaker: workshop with tools on the wall and a hammer on an anvil.
   A working building smokes, turns or glows; one at rest is quiet. A site goes through stages: foundation
@@ -206,12 +208,16 @@ them. (There is only ever one castle, and it can't be built.)
   and the colour blends smoothly where two meet. Tiles are pure functions of the pixel, tested for
   seamlessness, range and character.
 - **Flag menu**: click a flag with the Select tool and a radial menu opens round it, following the flag as
-  the map moves: *Road* (starts a road from this flag), *Geologist* (only on or beside a mountain; greyed out,
-  with the reason on hover, when no storage is joined by road or no hammer is in store) and *Remove flag*
-  (greyed out where the flag cannot go, with the reason). Any other click, another tool or Esc closes it;
-  choosing an item closes it and does it. `App.flagActions` decides what is offered, so more things (a
-  building list, a carrier call) can be added there. The Geologist and Demolish tools are still in the
-  toolbar.
+  the map moves: *Build* (a flag with no building only), *Road* (starts a road from this flag), *Geologist*
+  (only on or beside a mountain; greyed out, with the reason on hover, when no storage is joined by road or no
+  hammer is in store) and *Remove flag* (greyed out where the flag cannot go, with the reason). **Build**
+  opens a list beside the flag of every building with its cost (planks and stone), the ones that fit with this
+  flag as their door first (`App.buildOptions`, which asks the same `checkBuilding` the placement uses) and
+  the rest greyed out with the reason they do not fit; picking one puts the site up at once
+  (`buildFromMenu`), *Back* returns to the ring. The Build item is greyed out where nothing fits. Any other
+  click, another tool or Esc closes the menu; choosing an item closes it and does it. `App.flagActions`
+  decides what is offered, so more things (a carrier call) can be added there. The Geologist and Demolish
+  tools are still in the toolbar.
 - **Geologists** (Geologist tool, `g`; `Game.sendGeologist`, `checkGeologist`): as in the
   original, the ore under the mountains is hidden until a geologist probes it. Click a flag on or
   beside a mountain: a geologist walks there from the nearest storage by road (with tools he takes
