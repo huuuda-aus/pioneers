@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+
+# built by `make -C logistics` (the C++ parity oracle)
+logistics/logistics
+logistics/parity
+skeleton/skel
+
+# Freeserf checkout kept beside the project as a read-only reference (GPL, not part of this repo)
+ref/

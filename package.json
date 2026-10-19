@@ -1,0 +1,18 @@
+{
+  "name": "sett",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "pnpm -r test",
+    "dev": "pnpm --filter @sett/client dev",
+    "build": "pnpm --filter @sett/client build",
+    "typecheck": "pnpm -r typecheck",
+    "gen:parity": "make -C logistics parity.json && cp logistics/parity.json packages/sim/test/fixtures/parity.json"
+  },
+  "packageManager": "pnpm@10.33.3",
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
