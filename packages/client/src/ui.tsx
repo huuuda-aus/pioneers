@@ -63,6 +63,10 @@ const BUILD: ToolInfo[] = [
   { id: 'ironsmelter', label: 'Iron smelter', key: 'i', help: 'Needs 2 planks and 2 stone. Melts one iron ore with one coal into one iron.' },
   { id: 'toolmaker', label: 'Toolmaker', key: 'p', help: 'Needs 3 planks and 2 stone. Makes a tool from one iron and one plank. Every new worker needs a tool; a demolished building gives its tool back.' },
   { id: 'goldsmelter', label: 'Gold smelter', key: 'o', help: 'Needs 2 planks and 2 stone. Melts one gold ore with one coal into one gold.' },
+  { id: 'weaponsmith', label: 'Weaponsmith', key: 'l', help: 'Needs 2 planks and 2 stone. Melts one coal and one iron into a sword or a shield, whichever is behind. Arms the knights garrisoning a hut, tower or fortress.' },
+  { id: 'hut', label: 'Hut', key: 'd', help: 'Needs 2 planks and 1 stone. Claims the land around it once a knight garrisons it (up to 3). Weakest claim of the three.' },
+  { id: 'tower', label: 'Tower', key: 'j', help: 'Needs 3 planks and 3 stone. Garrisons up to 6 knights; claims more land than a hut.' },
+  { id: 'fortress', label: 'Fortress', key: 'k', help: 'Needs 5 planks and 5 stone. Garrisons up to 12 knights; claims as much land as the castle.' },
 ];
 
 const ALL_TOOLS: ToolInfo[] = [...TOOLS, ...BUILD];
@@ -151,6 +155,24 @@ export function Root({ app }: { app: App }) {
   const startNew = () => {
     if (!app.canContinue || window.confirm('Start a new game? Your saved game will be replaced.')) app.newGame();
   };
+  const importFile = useRef<HTMLInputElement>(null);
+  const exportGame = () => {
+    const blob = new Blob([app.exportSave()], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pioneers-save-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const onImportFile = (e: Event) => {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (app.canContinue && !window.confirm('Import this save? Your current game will be replaced.')) return;
+    file.text().then((text) => app.importSave(text));
+  };
   const tool = ALL_TOOLS.find((t) => t.id === app.tool)!;
   return (
     <div class="shell">
@@ -228,6 +250,15 @@ export function Root({ app }: { app: App }) {
             <button class="primary" disabled={!app.canContinue} onClick={() => app.continueGame()}>
               Continue game
             </button>
+            <div class="menu-row">
+              <button onClick={exportGame} title="Download the current save as a file">
+                Export save…
+              </button>
+              <button onClick={() => importFile.current?.click()} title="Load a save file from disk">
+                Import save…
+              </button>
+              <input ref={importFile} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={onImportFile} />
+            </div>
             <p class="menu-note">
               {app.lastSaved !== null
                 ? `Saved ${new Date(app.lastSaved).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`

@@ -195,6 +195,52 @@ describe('when it saves', () => {
   });
 });
 
+describe('export and import', () => {
+  it('exports the live game and an import of that text brings it back exactly', () => {
+    const store = new FakeStorage();
+    const a = new App('new', store);
+    place(a);
+    a.setTool('road');
+    a.click(25, 21);
+    a.click(29, 21);
+    a.setSpeed(4);
+    play(a, 3000);
+
+    const text = a.exportSave();
+    const b = new App('new', null);
+    place(b); // a different game in progress, to be replaced
+    const ok = b.importSave(text);
+
+    expect(ok).toBe(true);
+    expect(JSON.stringify(b.game.serialize())).toBe(JSON.stringify(a.game.serialize()));
+    expect(b.game.speed).toBe(4);
+    expect(b.screen).toBe('game');
+    expect(b.toast).toMatch(/imported/);
+  });
+
+  it('an import writes the game to this browser if there is storage', () => {
+    const store = new FakeStorage();
+    const app = new App('new', store);
+    const text = app.exportSave();
+    store.writes = 0;
+    app.importSave(text);
+    expect(store.writes).toBe(1);
+    expect(app.lastSaved).not.toBeNull();
+  });
+
+  it('rejects text that is not a save of this format, and keeps the current game', () => {
+    const app = new App('new', null);
+    place(app);
+    const before = app.game.serialize();
+    for (const bad of ['{not json', JSON.stringify({ format: 99, savedAt: 1, game: {} }), 'null']) {
+      const ok = app.importSave(bad);
+      expect(ok).toBe(false);
+      expect(app.toast).toMatch(/could not be loaded/);
+      expect(JSON.stringify(app.game.serialize())).toBe(JSON.stringify(before));
+    }
+  });
+});
+
 describe('when saving fails', () => {
   it('tells the player once, keeps playing, and says when it works again', () => {
     const store = new FakeStorage();

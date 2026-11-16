@@ -3,7 +3,7 @@
 // building occupies, the list of growing saplings) is left out and rebuilt on
 // load, so a save cannot disagree with itself about the layout.
 
-import type { Building, Flag, Geologist, Road, StoreLimits, Transporter } from './types.ts';
+import type { Building, Flag, Geologist, Knight, Road, StoreLimits, Transporter } from './types.ts';
 
 export const SAVE_VERSION = 1;
 
@@ -23,6 +23,8 @@ export interface SaveData {
   limits: StoreLimits | null;
   geologists?: Geologist[]; // absent in saves made before geologists
   nextGeologist?: number;
+  knights?: Knight[]; // absent in saves made before garrisons
+  nextKnight?: number;
   toolShare?: number[]; // absent in saves made before there were kinds of tool
   tools?: boolean; // absent in saves made before workers needed tools
   foodShare?: number[]; // absent in saves made before the food slider

@@ -20,12 +20,13 @@ import {
   type TerrainMap,
 } from '@sett/sim';
 
-export type ScenarioId = 'new' | 'demo' | 'food';
+export type ScenarioId = 'new' | 'demo' | 'food' | 'territory';
 
 export const SCENARIOS: { id: ScenarioId; name: string; help: string }[] = [
   { id: 'new', name: 'New game', help: 'Just the castle on fresh terrain, as in the original. Build out from it.' },
   { id: 'food', name: 'Food and mining', help: 'The whole food chain, built: fisher, farm, mill, well and baker feed a stone mine on the mountain. Cut a road and watch the mine starve.' },
   { id: 'demo', name: 'Running colony', help: 'A working chain: two lumberjacks, a sawmill and the castle. Add more with the tools.' },
+  { id: 'territory', name: 'Two colonies', help: 'Your castle and a second, untouched one far to the east: watch the tinted land each one claims.' },
 ];
 
 const COLS = 48;
@@ -52,8 +53,8 @@ function level(cx: number, cy: number, radius: number): TerrainMap {
   return t;
 }
 
-function placeCastle(g: Game, x: number, y: number): void {
-  const castle = g.placeBuilding(BuildingType.Castle, g.index(x, y), false);
+function placeCastle(g: Game, x: number, y: number, owner = 0): void {
+  const castle = g.placeBuilding(BuildingType.Castle, g.index(x, y), false, owner);
   for (const [res, n] of START_STOCK) g.addStock(castle, res, n);
 }
 
@@ -95,6 +96,7 @@ function connect(g: Game, flag: number, net: number[]): void {
 
 export function makeScenario(id: ScenarioId): Game {
   if (id === 'food') return foodScenario();
+  if (id === 'territory') return territoryScenario();
   if (id === 'new') {
     const g = new Game(COLS, ROWS, level(24, 20, 5));
     g.limits = { ...DEFAULT_LIMITS };
@@ -198,5 +200,37 @@ function foodScenario(): Game {
       if (g.terrain.kindAt(p) === Terrain.Mountain && !g.isOccupied(p)) g.objects!.setOre(p, 12, OreKind.Stone);
     }
   }
+  return g;
+}
+
+/**
+ * Your castle in the west, a second, untouched colony's castle far to the
+ * east: too far apart to reach each other's land, but close enough that the
+ * tinted territory around each one is easy to see. Demonstrates border claims
+ * only; the second colony never builds anything and nothing attacks.
+ */
+// A much bigger map than the single-player scenarios: room for a real
+// opponent's colony to grow into, all of it visible (no fog of war yet).
+const TERRITORY_COLS = 160;
+const TERRITORY_ROWS = 120;
+
+function territoryScenario(): Game {
+  const cols = TERRITORY_COLS;
+  const rows = TERRITORY_ROWS;
+  const t = generateTerrain({ cols, rows, seed: SEED });
+  const yours: [number, number] = [20, 60];
+  const theirs: [number, number] = [140, 60];
+  flattenArea(t, yours[0], yours[1], 5, FLAT_HEIGHT, 4);
+  flattenArea(t, theirs[0], theirs[1], 5, FLAT_HEIGHT, 4);
+  const g = new Game(cols, rows, t);
+  g.limits = { ...DEFAULT_LIMITS };
+  g.settlers = true;
+  g.tools = true;
+  placeCastle(g, yours[0], yours[1], 0);
+  placeCastle(g, theirs[0], theirs[1], 1);
+  const clear = (p: number): boolean =>
+    hexDistance((p % cols) - yours[0], Math.floor(p / cols) - yours[1]) <= 3 ||
+    hexDistance((p % cols) - theirs[0], Math.floor(p / cols) - theirs[1]) <= 3;
+  addObjects(g, clear);
   return g;
 }

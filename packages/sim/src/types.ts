@@ -2,17 +2,20 @@
 // Everything here is a number or a plain object, so a whole game state
 // serialises with JSON.stringify.
 
+/** `ownerAt` value for a point no one's military influence reaches. */
+export const UNCLAIMED = 255;
+
 // Directions on a skewed hex grid: Down = (x, y+1), DownRight = (x+1, y+1).
 export enum Dir { None = -1, Right, DownRight, Down, Left, UpLeft, Up }
 export const DIRS = 6;
 export const reverse = (d: Dir): Dir => ((d + 3) % DIRS) as Dir;
 
-export enum Res { None = -1, Lumber, Plank, Stone, Fish, Wheat, Flour, Water, Bread, Coal, IronOre, GoldOre, Iron, Gold, Axe, Pick, Shovel, Rod, Scythe, Saw, Hammer, Cleaver, Pig, Meat }
-export const RES_COUNT = 23;
+export enum Res { None = -1, Lumber, Plank, Stone, Fish, Wheat, Flour, Water, Bread, Coal, IronOre, GoldOre, Iron, Gold, Axe, Pick, Shovel, Rod, Scythe, Saw, Hammer, Cleaver, Pig, Meat, Sword, Shield }
+export const RES_COUNT = 25;
 /** The resources the C++ reference models; the parity fingerprint covers only these. */
 export const PARITY_RES = 3;
-export const RES_NAMES = ['lumber', 'plank', 'stone', 'fish', 'wheat', 'flour', 'water', 'bread', 'coal', 'iron ore', 'gold ore', 'iron', 'gold', 'axe', 'pick', 'shovel', 'rod', 'scythe', 'saw', 'hammer', 'cleaver', 'pig', 'meat'] as const;
-export const FLAG_PRIO = [1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]; // pickup priority per resource
+export const RES_NAMES = ['lumber', 'plank', 'stone', 'fish', 'wheat', 'flour', 'water', 'bread', 'coal', 'iron ore', 'gold ore', 'iron', 'gold', 'axe', 'pick', 'shovel', 'rod', 'scythe', 'saw', 'hammer', 'cleaver', 'pig', 'meat', 'sword', 'shield'] as const;
+export const FLAG_PRIO = [1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]; // pickup priority per resource
 /** What a mine will eat: any one of these counts as a unit of food. */
 export const FOOD: readonly Res[] = [Res.Fish, Res.Bread, Res.Meat];
 /** Top of a mine's food share (0 = it gets none). */
@@ -74,6 +77,7 @@ export interface Flag {
   building: number; // -1 = none
   searchNum: number;
   removed: boolean; // demolished: the slot stays so indices never shift
+  owner: number; // whose colony this flag belongs to, 0 by default
 }
 
 export interface Road {
@@ -87,11 +91,21 @@ export interface Road {
   carriers: number[]; // transporter indices on this road
   dynamic: boolean; // false: fixed carrier count, no hiring
   removed: boolean; // demolished or merged away: the slot stays so indices never shift
+  owner: number; // same owner as the two flags it joins
 }
 
 export enum TState { Idle, Walking, Arriving }
 
 export enum GeoPhase { Coming, Out, Probing, Home, Done }
+
+/** A knight on his way to garrison a Hut, Tower or Fortress, from the storage that armed him. */
+export interface Knight {
+  id: number;
+  home: number; // the storage he set out from
+  building: number; // the building he is walking to
+  counter: number; // ticks left on the road
+  total: number; // the whole walk, for drawing it
+}
 
 /** A geologist on a trip: from a storage to a flag, then from spot to spot, probing each, then home. */
 export interface Geologist {
@@ -140,7 +154,19 @@ export enum BuildingType {
   Toolmaker,
   PigFarm,
   Butcher,
+  Hut,
+  Tower,
+  Fortress,
+  Weaponsmith,
 }
+
+/** Knight slots a finished Hut/Tower/Fortress wants to fill; -1 for anything else. */
+export const GARRISON_CAPACITY: Partial<Record<BuildingType, number>> = {
+  [BuildingType.Hut]: 3,
+  [BuildingType.Tower]: 6,
+  [BuildingType.Fortress]: 12,
+};
+export const garrisonCapacityOf = (type: BuildingType): number => GARRISON_CAPACITY[type] ?? -1;
 
 /** The tool a worker of this building needs, or None (a store, a carrier, a well, a mill, a baker need none). */
 export function toolFor(type: BuildingType): Res {
@@ -159,6 +185,7 @@ export function toolFor(type: BuildingType): Res {
     case BuildingType.GoldSmelter:
     case BuildingType.Toolmaker: return Res.Hammer;
     case BuildingType.Butcher: return Res.Cleaver;
+    case BuildingType.Weaponsmith: return Res.Hammer;
     default: return Res.None;
   }
 }
@@ -217,6 +244,37 @@ export interface Building {
   // nothing, its ground stays blocked), then is `removed` for good.
   burning: number;
   removed: boolean;
+  owner: number; // whose colony this building belongs to, 0 by default
+  garrison: number; // Hut/Tower/Fortress only: knights currently inside
+}
+
+/**
+ * How strongly a building claims the land around it (0 = hut-grade, 1 =
+ * tower-grade, 2 = fortress-grade), -1 for a building with no military
+ * influence at all. Ported from freeserf's `mil_type` (game.cc,
+ * update_land_ownership) — the castle always uses the fortress row, even
+ * though it has no garrison of its own to manage (see `garrisonCapacityOf`).
+ */
+export function militaryStrength(b: Building): number {
+  switch (b.type) {
+    case BuildingType.Castle:
+    case BuildingType.Fortress: return 2;
+    case BuildingType.Tower: return 1;
+    case BuildingType.Hut: return 0;
+    default: return -1;
+  }
+}
+
+/**
+ * Does this building actually project territory right now? The castle
+ * always does (it has influence but no garrison to wait for); a Hut, Tower
+ * or Fortress only does once a knight has arrived — an empty one defends
+ * nothing, same as freeserf's `is_done() && is_active()` check.
+ */
+export function isActiveMilitary(b: Building): boolean {
+  if (militaryStrength(b) < 0) return false;
+  const cap = garrisonCapacityOf(b.type);
+  return cap < 0 || b.garrison > 0;
 }
 
 /**

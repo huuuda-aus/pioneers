@@ -4,7 +4,7 @@
 // All numbers here are placeholders to tune by feel, in the spirit of the
 // original (steeper land fits small buildings, big ones need level ground).
 
-import { BuildingType, DIRS, Dir } from './types.ts';
+import { BuildingType, DIRS, Dir, UNCLAIMED } from './types.ts';
 import { Terrain } from './terrain.ts';
 import { MapObject, OreKind, oreKindOf } from './objects.ts';
 import type { Game } from './game.ts';
@@ -26,6 +26,8 @@ export function buildingSize(type: BuildingType): BuildingSize {
     case BuildingType.GoldSmelter:
     case BuildingType.Toolmaker:
     case BuildingType.Butcher:
+    case BuildingType.Hut:
+    case BuildingType.Weaponsmith:
       return BuildingSize.Small;
     case BuildingType.Sawmill:
     case BuildingType.Storage:
@@ -34,6 +36,8 @@ export function buildingSize(type: BuildingType): BuildingSize {
     case BuildingType.Mill:
     case BuildingType.Baker:
     case BuildingType.PigFarm:
+    case BuildingType.Tower:
+    case BuildingType.Fortress:
       return BuildingSize.Large;
   }
 }
@@ -87,8 +91,9 @@ export function footprintOf(game: Game, type: BuildingType, pos: number): number
   return pts;
 }
 
-export function checkFlag(game: Game, pos: number): Check {
+export function checkFlag(game: Game, pos: number, owner = 0): Check {
   if (pos < 0) return no('outside the map');
+  if (!ownable(game, pos, owner)) return no('that land belongs to someone else');
   // A road tile is fine: a flag there splits the road (see Game.addFlag).
   if (game.flagAtPos(pos) >= 0 || game.buildingAtPos(pos) >= 0) {
     return no('position occupied');
@@ -101,6 +106,18 @@ export function checkFlag(game: Game, pos: number): Check {
   }
   if (game.terrain.kindAt(pos) === Terrain.Water) return no('cannot place a flag on water');
   return OK;
+}
+
+/**
+ * May `owner` build on this point? Your own claimed land, or land nobody
+ * claims yet — not land someone else's military buildings hold. (Simpler
+ * than the original, which requires it already be yours even for the first
+ * castle on a fresh map; unclaimed ground stays open so the single-player
+ * scenarios, which build beyond a lone castle's reach, keep working.)
+ */
+function ownable(game: Game, pos: number, owner: number): boolean {
+  const o = game.ownerAt[pos]!;
+  return o === owner || o === UNCLAIMED;
 }
 
 /** One road step from `from` to the adjacent point `to`. */
@@ -124,7 +141,7 @@ export interface BuildCheck extends Check {
 }
 
 /** Can a building of `type` stand with its building point at `pos`? */
-export function checkBuilding(game: Game, type: BuildingType, pos: number): BuildCheck {
+export function checkBuilding(game: Game, type: BuildingType, pos: number, owner = 0): BuildCheck {
   const flagPos = flagPosFor(game, pos);
   const footprint = pos < 0 ? null : footprintOf(game, type, pos);
   const fail = (reason: string): BuildCheck => ({ ok: false, reason, flagPos, footprint: footprint ?? [] });
@@ -133,6 +150,7 @@ export function checkBuilding(game: Game, type: BuildingType, pos: number): Buil
   if (flagPos < 0) return fail('no room for its flag');
 
   for (const q of footprint) {
+    if (!ownable(game, q, owner)) return fail('that land belongs to someone else');
     if (game.flagAtPos(q) >= 0 || game.roadAtPos(q) || game.buildingAtPos(q) >= 0) {
       return fail('something is in the way');
     }
@@ -167,7 +185,7 @@ export function checkBuilding(game: Game, type: BuildingType, pos: number): Buil
   if (fi >= 0) {
     if (game.flags[fi]!.building >= 0) return fail('that flag already has a building');
   } else {
-    const c = checkFlag(game, flagPos);
+    const c = checkFlag(game, flagPos, owner);
     if (!c.ok) return fail(`its flag: ${c.reason}`);
   }
   return { ok: true, reason: '', flagPos, footprint };

@@ -5,9 +5,9 @@ import { checkFlag, checkRoadStep, type Check } from './placement.ts';
 import type { Game } from './game.ts';
 
 /** Can a flag be added at (x, y)? `reason` says why not. */
-export function checkFlagAt(game: Game, x: number, y: number): Check {
+export function checkFlagAt(game: Game, x: number, y: number, owner = 0): Check {
   if (!game.inside(x, y)) return { ok: false, reason: 'outside the map' };
-  return checkFlag(game, game.index(x, y));
+  return checkFlag(game, game.index(x, y), owner);
 }
 
 /** True if a flag can be added at (x, y). */

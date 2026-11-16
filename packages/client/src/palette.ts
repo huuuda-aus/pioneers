@@ -25,6 +25,8 @@ export const RES_COLOR: Record<number, number> = {
   [Res.Cleaver]: 0x9aa7b4,
   [Res.Pig]: 0xf0a8b8,
   [Res.Meat]: 0xc4544a,
+  [Res.Sword]: 0x9aa7b4,
+  [Res.Shield]: 0x8d9aa8,
 };
 
 /** The flecks that show ore under a mountain, by kind (index OreKind). */
@@ -51,6 +53,10 @@ export const BUILDING_COLOR: Record<number, number> = {
   [BuildingType.Toolmaker]: 0x5f7a96,
   [BuildingType.PigFarm]: 0xb8604e,
   [BuildingType.Butcher]: 0xc23a3a,
+  [BuildingType.Hut]: 0x6b7a4f,
+  [BuildingType.Tower]: 0x5a6b8a,
+  [BuildingType.Fortress]: 0x4a4a5a,
+  [BuildingType.Weaponsmith]: 0x7a7a7a,
 };
 
 export const BUILDING_LABEL: Record<number, string> = {
@@ -74,6 +80,10 @@ export const BUILDING_LABEL: Record<number, string> = {
   [BuildingType.Toolmaker]: 'Tm',
   [BuildingType.PigFarm]: 'Pf',
   [BuildingType.Butcher]: 'Bt',
+  [BuildingType.Weaponsmith]: 'Ws',
+  [BuildingType.Hut]: 'Hu',
+  [BuildingType.Tower]: 'Tw',
+  [BuildingType.Fortress]: 'Ft',
 };
 
 /** The letter over a new worker's head as he walks to his building. */
@@ -96,6 +106,7 @@ export const WORKER_LETTER: Record<number, string> = {
   [BuildingType.Toolmaker]: 'Tm',
   [BuildingType.PigFarm]: 'Pf',
   [BuildingType.Butcher]: 'Bt',
+  [BuildingType.Weaponsmith]: 'Ws',
 };
 
 export const BUILDING_NAME: Record<number, string> = {
@@ -119,6 +130,10 @@ export const BUILDING_NAME: Record<number, string> = {
   [BuildingType.Toolmaker]: 'Toolmaker',
   [BuildingType.PigFarm]: 'Pig farm',
   [BuildingType.Butcher]: 'Butcher',
+  [BuildingType.Hut]: 'Hut',
+  [BuildingType.Tower]: 'Tower',
+  [BuildingType.Fortress]: 'Fortress',
+  [BuildingType.Weaponsmith]: 'Weaponsmith',
 };
 
 /** Terrain colours; grass and mountain blend with height. */
@@ -151,4 +166,8 @@ export const COLORS = {
   selected: 0xffe14d,
   ghostOk: 0x7cff8a,
   ghostBad: 0xff6b6b,
+  border: 0x1a1a1a, // the unclaimed side of a territory border
 } as const;
+
+/** Territory tint by owner, cycled for anyone past the last colour. */
+export const TERRITORY_COLORS = [0x3fa6ff, 0xff5d5d, 0xffd23f, 0x7cff8a] as const;

@@ -952,6 +952,11 @@ export function drawBuildingArt(g: Graphics, art: Art): void {
       case BuildingType.Toolmaker: return toolmaker(cc);
       case BuildingType.PigFarm: return pigFarm(cc);
       case BuildingType.Butcher: return butcher(cc);
+      // Placeholder looks until these get their own art: the smelter's shape, tinted.
+      case BuildingType.Weaponsmith: return smelter(cc, 0x7a7a7a);
+      case BuildingType.Hut: return smelter(cc, 0x6b7a4f);
+      case BuildingType.Tower: return smelter(cc, 0x5a6b8a);
+      case BuildingType.Fortress: return smelter(cc, 0x4a4a5a);
       default:
         if (MINES.has(art.type)) return mineAt(cc, art.ore ?? 1);
         return walls(cc, 0x999999, { texture: 'boards' }, cc.h, true);

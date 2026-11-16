@@ -1,7 +1,7 @@
 // Scenarios are built with the same checked placement the player uses, so a
 // layout that breaks a rule throws here instead of surprising someone later.
 import { describe, expect, it } from 'vitest';
-import { BuildingType, FLAT_HEIGHT, HARVEST_RADIUS, MapObject, OreKind, Res, hexDistance } from '@sett/sim';
+import { BuildingType, FLAT_HEIGHT, HARVEST_RADIUS, MapObject, OreKind, Res, UNCLAIMED, hexDistance } from '@sett/sim';
 import { makeScenario } from '../src/scenarios.ts';
 
 describe('new game', () => {
@@ -113,6 +113,32 @@ describe('running colony', () => {
     for (let i = 0; i < 6000; i++) g.update();
     expect(g.created[Res.Lumber]).toBeGreaterThan(0);
     expect(g.created[Res.Plank]).toBeGreaterThan(12); // beyond the starting planks
+    for (let r = 0; r < 3; r++) expect(g.created[r]! - g.consumed[r]!).toBe(g.countItems(r as Res));
+  });
+});
+
+describe('two colonies', () => {
+  it('builds both castles, each claiming its own land and nothing else', () => {
+    const g = makeScenario('territory');
+    const castles = g.buildings.filter((b) => b.type === BuildingType.Castle);
+    expect(castles.length).toBe(2);
+    expect(g.castleOf(0)).not.toBe(-1);
+    expect(g.castleOf(1)).not.toBe(-1);
+    for (const owner of [0, 1] as const) {
+      const c = g.buildings[g.castleOf(owner)]!;
+      expect(g.ownerAt[c.pos]).toBe(owner);
+    }
+    // the two colonies are far enough apart that no point belongs to both
+    let unclaimed = 0;
+    for (const o of g.ownerAt) if (o === UNCLAIMED) unclaimed++;
+    expect(unclaimed).toBeGreaterThan(0); // there is a no man's land between them
+  });
+
+  it('runs: owner 0 is a playable colony like any other new game', () => {
+    const g = makeScenario('territory');
+    const castle = g.buildings[g.castleOf(0)]!;
+    expect(castle.stock[Res.Plank]).toBe(12);
+    for (let i = 0; i < 3000; i++) g.update();
     for (let r = 0; r < 3; r++) expect(g.created[r]! - g.consumed[r]!).toBe(g.countItems(r as Res));
   });
 });

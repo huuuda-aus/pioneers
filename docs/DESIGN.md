@@ -83,7 +83,10 @@ them. (There is only ever one castle, and it can't be built.)
   version) is set aside under `sett.save.broken` and a new game starts, with a
   message. If the browser refuses to write (full, blocked) you are told once and the
   game goes on. One slot, one tab: two tabs overwrite each other. The camera, the
-  selected tool and the selection are not saved.
+  selected tool and the selection are not saved. The main screen can also **export** the
+  save as a `.json` file and **import** one back (same envelope, read straight from the
+  file rather than the slot); importing replaces the current game and is written to the
+  slot at once.
 - **Food and mining**: as in the original, only **mines eat**; carriers and every other
   worker never do. A mine uses one fish, bread *or* meat per unit it digs, and stops without. Fish
   come from a *fisher* (within 5 steps of water, may stand at the shore, the lake never runs
@@ -160,7 +163,7 @@ them. (There is only ever one castle, and it can't be built.)
   style. The picture is built only when roads, flags or buildings change. Carriers and walking people
   follow the same curve, not the straight steps. Pure geometry, tested (edge sides, widths, smoothness,
   determinism, normals).
-- **Buildings** (`buildings.ts`): each of the 20 buildings is drawn from vector shapes in the ground's
+- **Buildings** (`buildings.ts`): 20 of the 24 buildings are drawn from vector shapes in the ground's
   isometric view, from shared pieces (walls of boards, logs, stone, brick or plaster on a stone footing;
   gabled and hipped roofs with shingles; doors, windows with lit glass, chimneys) plus its own trade's props
   and life. Lumberjack: log cabin, chopping block with a swinging axe, log pile. Forester: mossy hut,
@@ -263,6 +266,49 @@ them. (There is only ever one castle, and it can't be built.)
   several units. With nothing in range it idles and looks again. A game without
   an object layer has unlimited resources, which is what the C++ parity
   scenarios model.
+- **Territory** (`game.ownerAt`): every flag, road and building has an
+  `owner`. A military building claims the land around it, up to 8 steps
+  away, falling off with hex distance (`closenessOf`, ported from freeserf's
+  `update_land_ownership`); the highest claim wins each point, ties or
+  nothing go unclaimed. Four kinds are military now: Hut (strength 0,
+  weakest), Tower (1), Fortress (2) and the castle (also 2, the top of the
+  three-row table, but fixed and still unbuildable). A Hut/Tower/Fortress
+  only counts once it has its first knight (`isActiveMilitary`); an empty one
+  defends nothing, same as freeserf's `is_done() && is_active()`. Whenever the claimant at
+  a point changes, anything of a different owner standing there now is torn
+  down: a building the same way the Demolish tool does (burns, `BURN_TICKS`;
+  a Hut/Tower/Fortress can go this way, unlike the castle), a flag or road at
+  once, as Demolish already does for those. The castle itself is exempt (it
+  can't be demolished, same rule as the Demolish tool); a burning military
+  building stops defending its land immediately, before it is actually gone.
+  Ownership is never saved: it is purely a function of the current military
+  buildings, so a restore recomputes it from scratch, same as the lookup
+  tables for what stands on each point. One castle per owner (`placeBuilding`'s
+  `owner` argument, 0 by default). A flag or building can only go on land
+  that is yours or nobody's (`checkFlag`/`checkBuilding`, ported from
+  freeserf's `can_build_flag`/`can_player_build`) — refused up front with a
+  reason, same as every other placement rule. Simpler than the original,
+  which requires it already be yours even for your first building ever (the
+  castle gets its own exemption there, requiring the opposite — unclaimed
+  land — since nothing is anyone's yet); here unclaimed ground just stays
+  open to everyone, so the single-player scenarios, which build beyond a
+  lone castle's reach, keep working. The passive check from the paragraph
+  above is still the backstop for land that gets contested *after* you built
+  on it. TypeScript only.
+- **Garrisons** (Hut, Tower, Fortress): each wants knights up to its capacity
+  (3/6/12) — no occupation slider yet, always full strength. A knight is a
+  generic worker armed with one sword and one shield from the nearest
+  storage reachable by road (`Game.hireKnight`); he walks over and, on
+  arrival, garrisons the building (`Building.garrison`). One recruit at a
+  time per building, retried every 300 ticks if none could be armed. A
+  **Weaponsmith** melts one coal and one iron into a sword or a shield, one
+  cycle at a time, picking whichever of the two is behind so they come out in
+  roughly equal numbers. No combat yet: garrisoned knights just sit there,
+  and the castle has no garrison of its own (its territory comes from being
+  fixed, not from who's inside). No gold-funded morale either — that only
+  matters once there's a fight to resolve. Hut/Tower/Fortress and Weaponsmith
+  have no art of their own yet; they borrow the smelter's shape, tinted.
+  TypeScript only.
 - **Parity**: `logistics/` is the C++ original of the logistics economy. `pnpm gen:parity`
   runs it over 19 scenarios and stores the results plus a state fingerprint
   (FNV hash of every flag, carrier, building and counter) in
@@ -274,7 +320,8 @@ them. (There is only ever one castle, and it can't be built.)
 
 Harvesters' and foresters' own trips ignore slope. The map is a bounded parallelogram (the
 original wraps). Placement limits, the large-building footprint and the
-castle's size are placeholders. No audio, military or AI. Saving has one slot, and no export or import.
+castle's size are placeholders. No audio, military or AI. Saving has one slot, but the main
+screen can export the save as a file and import one back.
 Carriers whose road is removed return to a storage instantly (no walk home),
 builders and ordinary carriers never go home otherwise, and carrier caps, build needs and timings
 are placeholders. Terrain is drawn once as a triangle mesh; everything else is

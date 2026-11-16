@@ -65,7 +65,8 @@ export function tradeOf(type: BuildingType): Trade | null {
     case BuildingType.GoldMine: return 'miner';
     case BuildingType.IronSmelter:
     case BuildingType.GoldSmelter: return 'smelter';
-    case BuildingType.Toolmaker: return 'smith';
+    case BuildingType.Toolmaker:
+    case BuildingType.Weaponsmith: return 'smith';
     case BuildingType.PigFarm: return 'swineherd';
     case BuildingType.Butcher: return 'butcher';
     case BuildingType.Well: return 'waterman';

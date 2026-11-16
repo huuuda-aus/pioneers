@@ -35,15 +35,33 @@ export function browserStorage(): KV | null {
   }
 }
 
+function makeEnvelope(game: Game, now: number): Envelope {
+  return { format: FORMAT, savedAt: now, game: game.serialize() };
+}
+
 export function writeSave(store: KV, game: Game, now: number): void {
-  const env: Envelope = { format: FORMAT, savedAt: now, game: game.serialize() };
-  store.setItem(SAVE_KEY, JSON.stringify(env));
+  store.setItem(SAVE_KEY, JSON.stringify(makeEnvelope(game, now)));
+}
+
+/** The save as JSON text, for the player to download. */
+export function exportSave(game: Game, now: number): string {
+  return JSON.stringify(makeEnvelope(game, now), null, 2);
 }
 
 export type LoadResult =
   | { kind: 'none' }
   | { kind: 'loaded'; game: Game; savedAt: number }
   | { kind: 'broken'; reason: string };
+
+function parseEnvelope(text: string): LoadResult {
+  try {
+    const env = JSON.parse(text) as Envelope;
+    if (!env || env.format !== FORMAT || typeof env.savedAt !== 'number') throw new Error('not a saved game of this version');
+    return { kind: 'loaded', game: Game.restore(env.game), savedAt: env.savedAt };
+  } catch (e) {
+    return { kind: 'broken', reason: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 /** Read the slot. A save that cannot be understood is moved aside, not deleted. */
 export function readSave(store: KV): LoadResult {
@@ -54,19 +72,21 @@ export function readSave(store: KV): LoadResult {
     return { kind: 'none' };
   }
   if (text === null) return { kind: 'none' };
-  try {
-    const env = JSON.parse(text) as Envelope;
-    if (!env || env.format !== FORMAT || typeof env.savedAt !== 'number') throw new Error('not a saved game of this version');
-    return { kind: 'loaded', game: Game.restore(env.game), savedAt: env.savedAt };
-  } catch (e) {
+  const result = parseEnvelope(text);
+  if (result.kind === 'broken') {
     try {
       store.setItem(BROKEN_KEY, text);
       store.removeItem(SAVE_KEY);
     } catch {
       /* nothing more can be done */
     }
-    return { kind: 'broken', reason: e instanceof Error ? e.message : String(e) };
   }
+  return result;
+}
+
+/** Parse a save file the player picked (uploaded, not from this browser's slot). */
+export function importSave(text: string): LoadResult {
+  return parseEnvelope(text);
 }
 
 export function clearSave(store: KV): void {

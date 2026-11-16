@@ -84,9 +84,10 @@ describe('trades', () => {
     expect(tradeOf(BuildingType.StoneMine)).toBe('miner');
     expect(tradeOf(BuildingType.Storage)).toBeNull();
     expect(tradeOf(BuildingType.Castle)).toBeNull();
+    const noWorker = new Set([BuildingType.Storage, BuildingType.Castle, BuildingType.Hut, BuildingType.Tower, BuildingType.Fortress]);
     const all = Object.values(BuildingType).filter((v): v is number => typeof v === 'number');
     for (const t of all) {
-      if (t !== BuildingType.Storage && t !== BuildingType.Castle) expect(tradeOf(t), `type ${t}`).not.toBeNull();
+      if (!noWorker.has(t)) expect(tradeOf(t), `type ${t}`).not.toBeNull();
     }
   });
 });

@@ -32,9 +32,10 @@ describe('everything can be drawn', () => {
     }
   });
 
-  it('every worker has a letter and a trade, stores aside', () => {
+  it('every worker has a letter and a trade, stores and garrisons aside', () => {
+    const noWorker = new Set([BuildingType.Storage, BuildingType.Castle, BuildingType.Hut, BuildingType.Tower, BuildingType.Fortress]);
     for (const t of types) {
-      if (t === BuildingType.Storage || t === BuildingType.Castle) continue;
+      if (noWorker.has(t)) continue;
       expect(WORKER_LETTER[t], BuildingType[t]).toBeTruthy();
       expect(tradeOf(t), BuildingType[t]).not.toBeNull();
     }

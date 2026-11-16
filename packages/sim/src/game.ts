@@ -20,8 +20,12 @@ import {
   FLAG_PRIO,
   FOOD,
   FOOD_MAX,
+  garrisonCapacityOf,
+  isActiveMilitary,
+  UNCLAIMED,
   GeoPhase,
   type Geologist,
+  type Knight,
   TOOL_KINDS,
   TOOL_MAX,
   toolFor,
@@ -42,13 +46,14 @@ import {
   acceptsAll,
   emptyItem,
   isStore,
+  militaryStrength,
   priority,
   reverse,
   stepTicks,
   STEP_TICKS,
 } from './types.ts';
 
-import { Terrain, TerrainMap, hash01 } from './terrain.ts';
+import { Terrain, TerrainMap, hash01, hexDistance } from './terrain.ts';
 import {
   FIELD_RADIUS,
   FIELD_TICKS,
@@ -78,6 +83,25 @@ const padRes = (a: number[]): number[] => (a.length >= RES_COUNT ? a : [...a, ..
 const DX = [1, 1, 0, -1, -1, 0];
 const DY = [0, 1, 1, 0, -1, -1];
 
+/**
+ * How far a military building's influence reaches (ported from freeserf's
+ * `update_land_ownership`, game.cc: both its radii are 8). A point's
+ * `closeness` to a source peaks at 9 right on the source and falls off with
+ * hex distance; `MILITARY_INFLUENCE[strength][closeness]` is how much that
+ * source adds there, -1 meaning an outright claim (close ring around a
+ * fortress or castle).
+ */
+const INFLUENCE_RADIUS = 8;
+const MILITARY_INFLUENCE: readonly (readonly number[])[] = [
+  [0, 1, 2, 4, 7, 12, 18, 29, -1, -1], // hut
+  [0, 3, 5, 8, 11, 15, 22, 30, -1, -1], // tower
+  [0, 6, 10, 14, 19, 23, 27, 31, -1, -1], // fortress (and the castle)
+];
+const closenessOf = (dx: number, dy: number): number => Math.max(0, 9 - hexDistance(dx, dy));
+
+/** How often an under-strength Hut/Tower/Fortress tries again for another knight. */
+const KNIGHT_RECRUIT_PERIOD = 300;
+
 /** One letter per building for render(). */
 const GLYPH: Record<BuildingType, string> = {
   [BuildingType.Lumberjack]: 'J',
@@ -100,6 +124,10 @@ const GLYPH: Record<BuildingType, string> = {
   [BuildingType.Toolmaker]: 'T',
   [BuildingType.PigFarm]: 'Q',
   [BuildingType.Butcher]: 'Z',
+  [BuildingType.Hut]: 'U',
+  [BuildingType.Tower]: 'V',
+  [BuildingType.Fortress]: 'E',
+  [BuildingType.Weaponsmith]: 'P',
 };
 
 const zeros = (): number[] => new Array<number>(RES_COUNT).fill(0);
@@ -183,6 +211,22 @@ function setNeeds(b: Building): void {
     case BuildingType.Butcher:
       b.need[Res.Plank] = 2;
       b.need[Res.Stone] = 1;
+      break;
+    case BuildingType.Hut:
+      b.need[Res.Plank] = 2;
+      b.need[Res.Stone] = 1;
+      break;
+    case BuildingType.Tower:
+      b.need[Res.Plank] = 3;
+      b.need[Res.Stone] = 3;
+      break;
+    case BuildingType.Fortress:
+      b.need[Res.Plank] = 5;
+      b.need[Res.Stone] = 5;
+      break;
+    case BuildingType.Weaponsmith:
+      b.need[Res.Plank] = 2;
+      b.need[Res.Stone] = 2;
       break;
     case BuildingType.Castle:
       break; // never built
@@ -280,6 +324,16 @@ function initOperation(b: Building): void {
       b.carriers = CASTLE_CARRIERS;
       b.builders = CASTLE_BUILDERS;
       break;
+    case BuildingType.Weaponsmith:
+      b.inGroups = [[Res.Coal], [Res.Iron]];
+      b.out = Res.Sword; // picked afresh each cycle, see the Idle branch in updateBuilding
+      b.maxIn = 4;
+      b.period = 700;
+      break;
+    case BuildingType.Hut:
+    case BuildingType.Tower:
+    case BuildingType.Fortress:
+      break; // no production: a garrison, handled by updateGarrison
   }
 }
 
@@ -327,6 +381,9 @@ export class Game {
   /** Geologists out on a trip. They are removed when they get home. */
   geologists: Geologist[] = [];
   private nextGeologist = 0;
+  /** Knights walking to garrison a Hut/Tower/Fortress. Removed on arrival (or if it stops wanting them). */
+  knights: Knight[] = [];
+  private nextKnight = 0;
   /** Ore a geologist has just found: the screen reads it and clears it. Not saved. */
   discoveries: { pos: number; kind: OreKind }[] = [];
   /** What the toolmakers should make: a weight per tool kind (index into TOOL_KINDS), 0 to TOOL_MAX. */
@@ -344,7 +401,9 @@ export class Game {
    */
   homebound: [number, number, number, number][] = [];
   private pendingOut: number[] = []; // building -> finished item not yet dropped
-  private castleIndex = -1;
+  private castleByOwner = new Map<number, number>();
+  /** Who owns each point, index() order; 255 = unclaimed. Derived from military buildings, never saved. */
+  ownerAt: Uint8Array;
   private searchId = 0;
   private builderFailed = false; // no builder available this step
   private hireFailed = false; // no carrier available this step
@@ -363,6 +422,7 @@ export class Game {
     this.flagAt = new Int32Array(cols * rows).fill(-1);
     this.roadAt = new Int32Array(cols * rows).fill(-1);
     this.buildingAt = new Int32Array(cols * rows).fill(-1);
+    this.ownerAt = new Uint8Array(cols * rows).fill(UNCLAIMED);
   }
 
   // ---- grid ------------------------------------------------------------
@@ -410,9 +470,14 @@ export class Game {
     return this.flagAt[pos]! >= 0 || this.roadAt[pos]! >= 0 || this.buildingAt[pos]! >= 0;
   }
 
-  /** Building index of the castle, -1 until one is placed. */
+  /** Building index of owner 0's castle, -1 until one is placed. */
   get castle(): number {
-    return this.castleIndex;
+    return this.castleByOwner.get(0) ?? -1;
+  }
+
+  /** Building index of an owner's castle, -1 until one is placed. */
+  castleOf(owner: number): number {
+    return this.castleByOwner.get(owner) ?? -1;
   }
 
   static maxCarriers(roadLength: number): number {
@@ -422,10 +487,10 @@ export class Game {
 
   // ---- setup (all throw Error on invalid placement) ---------------------
 
-  addFlag(x: number, y: number): number {
+  addFlag(x: number, y: number, owner = 0): number {
     if (!this.inside(x, y)) throw new Error('flag outside grid');
     const pos = this.index(x, y);
-    const check = checkFlag(this, pos);
+    const check = checkFlag(this, pos, owner);
     if (!check.ok) throw new Error(check.reason);
     const f: Flag = {
       index: this.flags.length,
@@ -435,6 +500,7 @@ export class Game {
       building: -1,
       searchNum: 0,
       removed: false,
+      owner,
     };
     const onRoad = this.roadAt[pos]!;
     this.flags.push(f);
@@ -502,6 +568,7 @@ export class Game {
       carriers: [],
       dynamic: true,
       removed: false,
+      owner: r.owner,
     };
     this.roads.push(r2);
     r.flag = [a, f.index];
@@ -602,6 +669,7 @@ export class Game {
       carriers: [],
       dynamic: carriers < 0,
       removed: false,
+      owner: a.owner,
     };
     this.roads.push(r);
     for (const t of tiles) this.roadAt[t] = r.index;
@@ -636,13 +704,14 @@ export class Game {
     const f = this.flags[flag];
     if (!f) throw new Error('no such flag');
     if (f.building >= 0) throw new Error('flag already has building');
-    this.assertCastleRules(type, construct);
+    this.assertCastleRules(type, construct, f.owner);
     const pos = this.move(f.pos, Dir.UpLeft);
     const b: Building = {
       index: this.buildings.length,
       type,
       flag,
       pos,
+      owner: f.owner,
       inGroups: [],
       out: Res.None,
       maxIn: 0,
@@ -672,6 +741,7 @@ export class Game {
       tick: this.tick,
       burning: 0,
       removed: false,
+      garrison: 0,
     };
     if (construct) setNeeds(b);
     else {
@@ -683,7 +753,7 @@ export class Game {
     this.buildings.push(b);
     this.pendingOut.push(0);
     f.building = b.index;
-    if (type === BuildingType.Castle) this.castleIndex = b.index;
+    if (type === BuildingType.Castle) this.castleByOwner.set(b.owner, b.index);
     // Record what the building covers. addBuilding itself does not judge
     // terrain (tests and scenarios use it freely); placeBuilding does.
     if (pos >= 0) {
@@ -691,6 +761,7 @@ export class Game {
       for (const q of covered) this.buildingAt[q] = b.index;
     }
     this.layoutVersion++;
+    if (!construct && b.pos >= 0 && militaryStrength(b) >= 0) this.updateLandOwnership(b.pos);
     return b.index;
   }
 
@@ -821,7 +892,7 @@ export class Game {
       if (geo.phase !== GeoPhase.Done) return true;
       if (geo.hasTool) {
         const b = this.buildings[geo.home]!;
-        const to = b.removed || !acceptsAll(b) ? this.castleIndex : geo.home;
+        const to = b.removed || !acceptsAll(b) ? this.castleByOwner.get(b.owner) ?? -1 : geo.home;
         if (to >= 0) this.buildings[to]!.stock[Res.Hammer]!++;
         else this.lost[Res.Hammer]!++;
       }
@@ -912,7 +983,7 @@ export class Game {
       storage = fl.building;
       return true;
     });
-    if (storage < 0) storage = this.castleIndex;
+    if (storage < 0) storage = this.castleByOwner.get(b.owner) ?? -1;
     const tool = toolFor(b.type);
     if (storage >= 0) this.buildings[storage]!.stock[tool]!++;
     else this.lost[tool]!++;
@@ -943,10 +1014,10 @@ export class Game {
     return acceptsAll(b) && (b.capacity <= 0 || b.stock[r]! + b.incoming[r]! < b.capacity);
   }
 
-  private assertCastleRules(type: BuildingType, construct: boolean): void {
+  private assertCastleRules(type: BuildingType, construct: boolean, owner: number): void {
     if (type !== BuildingType.Castle) return;
     if (construct) throw new Error('a castle cannot be built');
-    if (this.castleIndex >= 0) throw new Error('only one castle');
+    if (this.castleByOwner.has(owner)) throw new Error('only one castle');
   }
 
   /**
@@ -954,12 +1025,12 @@ export class Game {
    * flag goes to the down-right neighbour (reused if one is already there).
    * Throws with the reason when the spot is not allowed.
    */
-  placeBuilding(type: BuildingType, pos: number, construct = true): number {
-    this.assertCastleRules(type, construct);
-    const check = checkBuilding(this, type, pos);
+  placeBuilding(type: BuildingType, pos: number, construct = true, owner = 0): number {
+    this.assertCastleRules(type, construct, owner);
+    const check = checkBuilding(this, type, pos, owner);
     if (!check.ok) throw new Error(check.reason);
     let fi = this.flagAt[check.flagPos]!;
-    if (fi < 0) fi = this.addFlag(check.flagPos % this.cols, Math.floor(check.flagPos / this.cols));
+    if (fi < 0) fi = this.addFlag(check.flagPos % this.cols, Math.floor(check.flagPos / this.cols), owner);
     return this.addBuilding(type, fi, construct);
   }
 
@@ -1043,6 +1114,7 @@ export class Game {
     for (const t of this.transporters) if (!t.gone) this.updateTransporter(t);
     this.updateHomebound(this.speed);
     if (this.geologists.length > 0) this.updateGeologists(this.speed);
+    if (this.knights.length > 0) this.updateKnights(this.speed);
   }
 
   private updateHomebound(delta: number): void {
@@ -1259,6 +1331,10 @@ export class Game {
       this.updateArrival(b, delta);
       return;
     }
+    if (garrisonCapacityOf(b.type) >= 0) {
+      this.updateGarrison(b, delta);
+      return;
+    }
     const planter = b.type === BuildingType.Forester;
     if (planter && !this.objects) return; // nothing to plant on
     if (isStore(b)) {
@@ -1300,6 +1376,10 @@ export class Game {
         const kind = this.chooseTool();
         if (kind === Res.None) return; // every slider is at 0
         b.out = kind;
+      }
+      if (b.type === BuildingType.Weaponsmith) {
+        // self-balancing: whichever of the two is behind gets made next
+        b.out = this.created[Res.Sword]! <= this.created[Res.Shield]! ? Res.Sword : Res.Shield;
       }
       if (b.inGroups.length > 0) {
         // one unit from each group, or wait until every group has one
@@ -1603,10 +1683,13 @@ export class Game {
     if (b.builderHome >= 0) this.buildings[b.builderHome]!.builders++; // walks home
     b.builder = BuilderState.None;
     b.builderHome = -1;
-    if ((this.settlers || this.tools) && !isStore(b)) {
+    if ((this.settlers || this.tools) && !isStore(b) && garrisonCapacityOf(b.type) < 0) {
       b.state = BState.Arriving; // builderHome is free again: it holds the worker's storage
       b.counter = 0;
+    } else if (garrisonCapacityOf(b.type) >= 0) {
+      b.counter = 0; // try for its first knight right away
     }
+    if (b.pos >= 0 && militaryStrength(b) >= 0) this.updateLandOwnership(b.pos);
   }
 
   /** The worker walks from the nearest storage by road; with no way there, he waits. */
@@ -1638,6 +1721,52 @@ export class Game {
     if (b.counter >= 0) return;
     b.builderHome = -1;
     b.state = BState.Idle;
+  }
+
+  /**
+   * A Hut/Tower/Fortress has no single worker: it just wants knights, up to
+   * its capacity. One at a time — it waits for its current recruit before
+   * asking for another — retrying every KNIGHT_RECRUIT_PERIOD.
+   */
+  private updateGarrison(b: Building, delta: number): void {
+    if (b.garrison >= garrisonCapacityOf(b.type)) return;
+    b.counter -= delta;
+    if (b.counter > 0) return;
+    b.counter = KNIGHT_RECRUIT_PERIOD;
+    if (this.knights.some((k) => k.building === b.index)) return;
+    this.hireKnight(b);
+  }
+
+  /** Arms a knight from the nearest storage with a sword and a shield in stock, and sends him walking. */
+  private hireKnight(b: Building): void {
+    let storage = -1;
+    let dist = 0;
+    this.search(b.flag, false, (fl, _hop, d) => {
+      if (fl.building < 0) return false;
+      const s = this.buildings[fl.building]!;
+      if (!acceptsAll(s) || s.stock[Res.Sword]! <= 0 || s.stock[Res.Shield]! <= 0) return false;
+      storage = fl.building;
+      dist = d;
+      return true;
+    });
+    if (storage < 0) return;
+    this.buildings[storage]!.stock[Res.Sword]!--;
+    this.buildings[storage]!.stock[Res.Shield]!--;
+    this.knights.push({ id: this.nextKnight++, home: storage, building: b.index, counter: dist, total: dist });
+  }
+
+  /** Knights on the road to garrison a Hut/Tower/Fortress. A lost destination (demolished mid-walk) is a lost knight. */
+  private updateKnights(delta: number): void {
+    this.knights = this.knights.filter((k) => {
+      k.counter -= delta;
+      if (k.counter > 0) return true;
+      const b = this.buildings[k.building];
+      if (b && !b.removed && b.burning === 0 && garrisonCapacityOf(b.type) >= 0) {
+        b.garrison++;
+        if (b.garrison === 1 && b.pos >= 0) this.updateLandOwnership(b.pos); // its first knight: now it defends land
+      }
+      return false;
+    });
   }
 
   /**
@@ -1844,6 +1973,8 @@ export class Game {
       toolShare: this.toolShare,
       geologists: this.geologists,
       nextGeologist: this.nextGeologist,
+      knights: this.knights,
+      nextKnight: this.nextKnight,
       flags: this.flags,
       roads: this.roads,
       buildings: this.buildings,
@@ -1903,6 +2034,8 @@ export class Game {
     if (d.toolShare) g.toolShare = TOOL_KINDS.map((_, i) => d.toolShare![i] ?? 5); // saves from before a tool existed ask 5 for it
     g.geologists = d.geologists ?? [];
     g.nextGeologist = d.nextGeologist ?? g.geologists.length;
+    g.knights = d.knights ?? [];
+    g.nextKnight = d.nextKnight ?? g.knights.length;
     g.flags = d.flags;
     g.roads = d.roads;
     g.buildings = d.buildings;
@@ -1927,13 +2060,16 @@ export class Game {
     this.flagAt.fill(-1);
     this.roadAt.fill(-1);
     this.buildingAt.fill(-1);
-    this.castleIndex = -1;
+    this.ownerAt.fill(UNCLAIMED);
+    this.castleByOwner.clear();
     for (const f of this.flags) {
+      f.owner ??= 0; // saves made before owners existed
       if (f.removed) continue;
       if (!(f.pos >= 0 && f.pos < this.flagAt.length)) bad('flag outside the map');
       this.flagAt[f.pos] = f.index;
     }
     for (const r of this.roads) {
+      r.owner ??= 0;
       if (r.removed) continue;
       const a = this.flags[r.flag[0]];
       const b = this.flags[r.flag[1]];
@@ -1946,15 +2082,22 @@ export class Game {
       }
     }
     for (const b of this.buildings) {
+      b.owner ??= 0;
+      b.garrison ??= 0;
       if (b.removed) continue;
       if (!this.flags[b.flag]) bad('building without a flag');
       if (b.pos >= 0) {
         for (const q of footprintOf(this, b.type, b.pos) ?? [b.pos]) this.buildingAt[q] = b.index;
       }
-      if (b.type === BuildingType.Castle) this.castleIndex = b.index;
+      if (b.type === BuildingType.Castle) this.castleByOwner.set(b.owner, b.index);
     }
     for (const t of this.transporters) {
       if (!t.gone && !this.roads[t.road]) bad('carrier on a missing road');
+    }
+    // Territory is purely a function of the current military buildings, so it is
+    // never saved: just recompute it from whatever came back.
+    for (const b of this.buildings) {
+      if (!b.removed && b.burning === 0 && b.pos >= 0 && militaryStrength(b) >= 0) this.updateLandOwnership(b.pos);
     }
   }
 
@@ -1982,7 +2125,7 @@ export class Game {
       storage = fl.building;
       return true;
     });
-    if (storage < 0 && this.castleIndex >= 0) storage = this.castleIndex;
+    if (storage < 0) storage = this.castleByOwner.get(this.flags[near]!.owner) ?? -1;
     if (storage >= 0) this.buildings[storage]!.carriers++;
   }
 
@@ -2191,6 +2334,8 @@ export class Game {
     b.burning = BURN_TICKS;
     b.tick = this.tick;
     this.layoutVersion++;
+    // a burning building defends nothing: its land is up for grabs again
+    if (b.pos >= 0 && militaryStrength(b) >= 0) this.updateLandOwnership(b.pos);
   }
 
   private burnOut(b: Building): void {
@@ -2202,6 +2347,106 @@ export class Game {
       }
     }
     this.layoutVersion++;
+  }
+
+  // ---- territory ---------------------------------------------------------
+
+  /**
+   * Recompute who owns the land in a window around `initPos` (ported from
+   * freeserf's `update_land_ownership`): every active military building's
+   * influence is tallied per point, the highest tally wins the point, and
+   * anything belonging to someone else now gets torn down (`surrenderPoint`).
+   * Called once whenever a military building is placed, finished or removed.
+   */
+  private updateLandOwnership(initPos: number): void {
+    const R = INFLUENCE_RADIUS;
+    const cx = initPos % this.cols;
+    const cy = Math.floor(initPos / this.cols);
+    const tally = new Map<number, Map<number, number>>(); // pos -> owner -> score
+
+    for (const b of this.buildings) {
+      if (b.removed || b.burning > 0 || b.pos < 0 || !isActiveMilitary(b)) continue;
+      const strength = militaryStrength(b);
+      const bx = b.pos % this.cols;
+      const by = Math.floor(b.pos / this.cols);
+      if (hexDistance(bx - cx, by - cy) > 2 * R) continue; // too far to reach this window
+      const row = MILITARY_INFLUENCE[strength]!;
+      for (let dy = -R; dy <= R; dy++) {
+        for (let dx = -R; dx <= R; dx++) {
+          const c = closenessOf(dx, dy);
+          if (c <= 0) continue;
+          const x = bx + dx;
+          const y = by + dy;
+          if (!this.inside(x, y)) continue;
+          if (hexDistance(x - cx, y - cy) > R) continue; // only the window being recomputed
+          const inf = row[c]!;
+          const pos = this.index(x, y);
+          let byOwner = tally.get(pos);
+          if (!byOwner) {
+            byOwner = new Map();
+            tally.set(pos, byOwner);
+          }
+          const cur = byOwner.get(b.owner) ?? 0;
+          byOwner.set(b.owner, inf < 0 ? 128 : Math.min(127, cur + inf));
+        }
+      }
+    }
+
+    const changed: number[] = [];
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        const x = cx + dx;
+        const y = cy + dy;
+        if (!this.inside(x, y)) continue;
+        const pos = this.index(x, y);
+        const byOwner = tally.get(pos);
+        let best = 0;
+        let bestOwner = UNCLAIMED;
+        if (byOwner) {
+          for (const [owner, score] of byOwner) {
+            if (score > best) {
+              best = score;
+              bestOwner = owner;
+            }
+          }
+        }
+        if (this.ownerAt[pos] !== bestOwner) {
+          this.ownerAt[pos] = bestOwner;
+          changed.push(pos);
+        }
+      }
+    }
+    // Buildings first: freeing a building's point also clears its door flag's
+    // `building` field, so a flag losing the same point right after can go too.
+    for (const pos of changed) this.surrenderBuilding(pos);
+    for (const pos of changed) this.surrenderFlagOrRoad(pos);
+  }
+
+  /** A building now standing on someone else's land burns, like the Demolish tool (the castle is exempt). */
+  private surrenderBuilding(pos: number): void {
+    const bi = this.buildingAt[pos];
+    if (bi < 0) return;
+    const b = this.buildings[bi]!;
+    if (b.removed || b.burning > 0 || b.type === BuildingType.Castle || b.owner === this.ownerAt[pos]) return;
+    this.demolishBuilding(bi);
+  }
+
+  /** A flag or road tile now standing on someone else's land is removed outright (no burn delay, as the Demolish tool already does for these). */
+  private surrenderFlagOrRoad(pos: number): void {
+    const fi = this.flagAt[pos];
+    if (fi >= 0) {
+      const f = this.flags[fi]!;
+      if (!f.removed && f.owner !== this.ownerAt[pos] && f.building < 0) {
+        for (const ri of f.road) if (ri >= 0 && !this.roads[ri]!.removed) this.demolishRoad(ri);
+        if (this.checkDemolishFlag(fi).ok) this.demolishFlag(fi);
+      }
+      return;
+    }
+    const ri = this.roadAt[pos];
+    if (ri >= 0) {
+      const r = this.roads[ri]!;
+      if (!r.removed && r.owner !== this.ownerAt[pos]) this.demolishRoad(ri);
+    }
   }
 
   // ---- introspection ---------------------------------------------------

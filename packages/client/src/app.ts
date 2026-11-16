@@ -4,7 +4,7 @@
 
 import { BuildingType, Game, MapObject, ORE_NAMES, SIGN_EMPTY, buildNeeds, type OreKind, Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
 import { BUILDING_NAME } from './palette.ts';
-import { type KV, readSave, writeSave } from './persistence.ts';
+import { type KV, exportSave, importSave, readSave, writeSave } from './persistence.ts';
 import { makeScenario, type ScenarioId } from './scenarios.ts';
 
 export const STEP_MS = 20; // 50 Hz, like the original on the vertical blank
@@ -36,6 +36,10 @@ export type Tool =
   | 'toolmaker'
   | 'pigfarm'
   | 'butcher'
+  | 'hut'
+  | 'tower'
+  | 'fortress'
+  | 'weaponsmith'
   | 'storage'
   | 'geologist'
   | 'demolish';
@@ -89,6 +93,10 @@ const BUILD_ORDER: BuildingType[] = [
   BuildingType.IronSmelter,
   BuildingType.Toolmaker,
   BuildingType.GoldSmelter,
+  BuildingType.Weaponsmith,
+  BuildingType.Hut,
+  BuildingType.Tower,
+  BuildingType.Fortress,
 ];
 
 const SITE_TOOLS: Partial<Record<Tool, BuildingType>> = {
@@ -110,6 +118,10 @@ const SITE_TOOLS: Partial<Record<Tool, BuildingType>> = {
   toolmaker: BuildingType.Toolmaker,
   pigfarm: BuildingType.PigFarm,
   butcher: BuildingType.Butcher,
+  weaponsmith: BuildingType.Weaponsmith,
+  hut: BuildingType.Hut,
+  tower: BuildingType.Tower,
+  fortress: BuildingType.Fortress,
   storage: BuildingType.Storage,
 };
 
@@ -214,6 +226,36 @@ export class App {
         this.say(`Could not save the game: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+  }
+
+  /** The save as JSON text, for the player to download. */
+  exportSave(): string {
+    return exportSave(this.game, Date.now());
+  }
+
+  /** Replace the game with one parsed from an uploaded save file. The caller has already confirmed replacing any game in progress. */
+  importSave(text: string): boolean {
+    const result = importSave(text);
+    if (result.kind === 'none') return false; // importSave never returns this
+    if (result.kind === 'broken') {
+      this.toast = `The file could not be loaded (${result.reason}).`;
+      this.toastTimer = setTimeout(() => this.say(''), 5000);
+      this.changed();
+      return false;
+    }
+    this.game = result.game;
+    this.game.settlers = true; // games saved before workers walked in get it too
+    this.lastSpeed = result.game.speed > 0 ? result.game.speed : 2;
+    this.lastSaved = null; // not yet written to this browser's slot
+    this.acc = 0;
+    this.selection = null;
+    this.menu = null;
+    this.screen = 'game';
+    this.saveNow();
+    this.toast = 'Game imported.';
+    this.toastTimer = setTimeout(() => this.say(''), 3500);
+    this.changed();
+    return true;
   }
 
   /** The player changed the game: save soon. */

@@ -223,7 +223,7 @@ describe('the Build list', () => {
   it('lists every building with its cost, the ones that fit first', () => {
     const { app, meadow } = world();
     const list = app.buildOptions(meadow);
-    expect(list.length).toBe(19);
+    expect(list.length).toBe(23);
     const firstOff = list.findIndex((o) => !o.enabled);
     expect(firstOff).toBeGreaterThan(0);
     for (let i = 0; i < list.length; i++) expect(list[i]!.enabled, `${list[i]!.name} at ${i}`).toBe(i < firstOff);
@@ -234,7 +234,7 @@ describe('the Build list', () => {
       expect(o.name.length).toBeGreaterThan(2);
     }
     expect(list.map((o) => o.type)).not.toContain(T.Castle);
-    expect(new Set(list.map((o) => o.type)).size).toBe(19);
+    expect(new Set(list.map((o) => o.type)).size).toBe(23);
   });
 
   it('what fits depends on the ground: a mine on meadow does not, a lumberjack on rock does not', () => {

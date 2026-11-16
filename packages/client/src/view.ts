@@ -21,6 +21,7 @@ import {
   Res,
   SIGN_TICKS,
   TState,
+  UNCLAIMED,
   MOUNTAIN_LEVEL,
   SEA_LEVEL,
   Terrain,
@@ -36,7 +37,7 @@ import {
   type Road,
 } from '@sett/sim';
 import type { App } from './app.ts';
-import { BUILDING_LABEL, COLORS, OBJECT_COLORS, ORE_COLOR, RES_COLOR, WORKER_LETTER } from './palette.ts';
+import { BUILDING_LABEL, COLORS, OBJECT_COLORS, ORE_COLOR, RES_COLOR, TERRITORY_COLORS, WORKER_LETTER } from './palette.ts';
 import { LAND, seaColor, clamp, dirtColor, fbm2, forestFloorColor, grassColor, hash2, leafColors, lerpColor, rockColor, sandColor, scaleColor, screeColor, slopeLight, snowAmount, speciesAt, waterColor, type Species } from './art.ts';
 import { GROUNDS, paintGround, type Ground } from './textures.ts';
 import { clipBand, contourSegment, distanceField, polyArea, wavyOutline, type Vert } from './coast.ts';
@@ -47,6 +48,16 @@ import { ROW_H, S, flatY, gridBounds, pickHex, posToWorld, toWorld, type Pt } fr
 
 /** Samples per tile on a road's smooth curve (the curve the road is drawn along). */
 const CURVE_K = 4;
+
+/** The grid's 6 neighbour steps, in cyclic order (Right, DownRight, Down, Left, UpLeft, Up). */
+const NEIGHBOUR_DIRS: readonly [number, number][] = [
+  [1, 0],
+  [1, 1],
+  [0, 1],
+  [-1, 0],
+  [-1, -1],
+  [0, -1],
+];
 
 interface RoadGeometry {
   pts: Pt[]; // projected, with terrain height
@@ -88,6 +99,8 @@ export class View {
   private atmosSize = '';
   private coastRuns: { x: number; y: number }[][] = []; // the outer foam line, in runs, for the pulse
   private gWater = new Graphics();
+  private gTerritory = new Graphics(); // tinted land each owner's military buildings claim
+  private territoryKey = '';
   private gRoads = new Graphics();
   private ground = new Map<Ground, { texture: Texture; matrix: Matrix }>();
   private depth: Uint8Array = new Uint8Array(0); // per point: steps to the nearest land for water points, 0 on land
@@ -126,7 +139,7 @@ export class View {
       texture.source.autoGenerateMipmaps = true;
       this.ground.set(kind, { texture, matrix: new Matrix().scale(GROUND_SCALE[kind], GROUND_SCALE[kind]) });
     }
-    this.world.addChild(this.ocean, this.terrain, this.gCoast, this.gWater, this.gClouds, this.gRoads, this.gSites, this.gObjects, this.labelLayer, this.gOverlay);
+    this.world.addChild(this.ocean, this.terrain, this.gTerritory, this.gCoast, this.gWater, this.gClouds, this.gRoads, this.gSites, this.gObjects, this.labelLayer, this.gOverlay);
     this.pixi.stage.addChild(this.world, this.gAtmos);
     this.bindInput();
     this.pixi.ticker.add((ticker) => {
@@ -234,6 +247,7 @@ export class View {
     if (this.builtFor !== game) this.rebuild(game);
     this.drawWater(game);
     this.drawSky();
+    this.drawTerritory(game);
     this.drawRoads(game);
     this.drawSites(game);
     this.drawScene(game);
@@ -247,6 +261,7 @@ export class View {
     this.geoVersion = -1;
     this.roadsKey = '';
     this.siteCache = { key: '', positions: [] };
+    this.territoryKey = '';
     for (const t of this.labels.values()) t.destroy();
     this.labels.clear();
     this.buildTerrain(game);
@@ -908,6 +923,68 @@ export class View {
     return this.siteCache.positions;
   }
 
+  /**
+   * A translucent tint over the land each owner's military buildings claim
+   * (`game.ownerAt`), plus a border line wherever the claim changes. Each
+   * point on a border draws its own side of the fence: an arc connecting the
+   * midpoints of its two neighbouring crossings, in cyclic order round the
+   * point, so both sides trace a continuous line rather than a pile of
+   * disconnected ticks (which is what made near-horizontal stretches look
+   * jagged — a lone perpendicular tick per crossing, each angled differently
+   * depending on which of the 6 grid directions it crossed). Redrawn only
+   * when the layout changes (a military building placed, finished, removed,
+   * or newly garrisoned bumps `layoutVersion`), not every frame.
+   */
+  private drawTerritory(game: Game): void {
+    const key = `${game.layoutVersion}`;
+    if (this.territoryKey === key) return;
+    this.territoryKey = key;
+    const g = this.gTerritory;
+    g.clear();
+    const colorOf = (owner: number): number => (owner === UNCLAIMED ? COLORS.border : TERRITORY_COLORS[owner % TERRITORY_COLORS.length]!);
+    const mids: (Pt | null)[] = new Array(6);
+    for (let p = 0; p < game.ownerAt.length; p++) {
+      const owner = game.ownerAt[p]!;
+      const wp = posToWorld(game, p);
+      if (owner !== UNCLAIMED) g.ellipse(wp.x, wp.y, S * 0.6, (S * 0.6) / 2).fill({ color: colorOf(owner), alpha: 0.16 });
+
+      const x = p % game.cols;
+      const y = Math.floor(p / game.cols);
+      let crossings = 0;
+      for (let i = 0; i < 6; i++) {
+        const [dx, dy] = NEIGHBOUR_DIRS[i]!;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (!game.inside(nx, ny)) {
+          mids[i] = null;
+          continue;
+        }
+        const other = game.ownerAt[game.index(nx, ny)]!;
+        if (other === owner) {
+          mids[i] = null;
+          continue;
+        }
+        crossings++;
+        const wn = posToWorld(game, game.index(nx, ny));
+        mids[i] = { x: (wp.x + wn.x) / 2, y: (wp.y + wn.y) / 2 };
+      }
+      if (crossings === 0) continue;
+      const color = colorOf(owner);
+      let connected = 0;
+      for (let i = 0; i < 6; i++) {
+        const a = mids[i];
+        const b = mids[(i + 1) % 6];
+        if (!a || !b) continue;
+        g.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: 3, color, alpha: 0.9 });
+        connected++;
+      }
+      if (connected === 0) {
+        // an isolated crossing with no neighbouring one to join: a short spoke so it isn't lost
+        for (const m of mids) if (m) g.moveTo(wp.x, wp.y).lineTo(m.x, m.y).stroke({ width: 3, color, alpha: 0.9 });
+      }
+    }
+  }
+
   private drawSites(game: Game): void {
     const g = this.gSites;
     g.clear();
@@ -1168,6 +1245,35 @@ export class View {
         draw: () => drawPerson(g, p.x, p.y, { action: 'walk', phase: (u * S) / (8 * CURVE_K), facing, trade: 'carrier' }),
       });
     });
+    // knights on their way to garrison a hut, tower or fortress
+    for (const k of game.knights) {
+      const dest = game.buildings[k.building];
+      if (!dest || dest.removed) continue;
+      const id = -1_000_000 - k.id; // keeps clear of every other id namespace here
+      const geo = this.walkGeometry(game, id, game.buildings[k.home]!.flag, dest.flag, k.home, k.building);
+      used.add(id);
+      if (!geo) continue;
+      const progress = k.total > 0 ? clamp(1 - Math.max(0, k.counter - alpha * game.speed) / k.total, 0, 1) : 1;
+      const u = progress * (geo.pts.length - 1);
+      const p = pointAt(geo.pts, u);
+      const ahead = pointAt(geo.pts, u + 1.2);
+      const facing: 1 | -1 = ahead.x >= p.x ? 1 : -1;
+      let tag = this.walkerTags.get(id);
+      if (!tag) {
+        tag = new Text({
+          text: 'Kn',
+          style: { fill: 0xffffff, fontSize: 15, fontWeight: '700', fontFamily: 'system-ui, sans-serif', stroke: { color: 0x000000, width: 3 } },
+        });
+        tag.anchor.set(0.5, 1);
+        this.labelLayer.addChild(tag);
+        this.walkerTags.set(id, tag);
+      }
+      tag.position.set(p.x, p.y - 28);
+      scene.push({
+        key: valueAt(geo.flat, u) + 0.6,
+        draw: () => drawPerson(g, p.x, p.y, { action: 'walk', phase: (u * S) / (8 * CURVE_K), facing, trade: 'builder' }),
+      });
+    }
     for (const [i, t] of this.walkerTags) {
       if (used.has(i)) continue;
       t.destroy();
