@@ -101,6 +101,9 @@ export enum GeoPhase { Coming, Out, Probing, Home, Done }
 export const MIN_GARRISON = 1; // a building never sends out its last knight
 export const ATTACK_RANGE = 16; // steps from one of your garrisons to a target you may attack
 export const FIGHT_TICKS = 300; // one duel
+/** A building under attack calls on garrisons this near (steps) to send knights, one each HELP_PERIOD ticks. */
+export const HELP_RANGE = 8;
+export const HELP_PERIOD = 100;
 
 /** A military building must stand more than this many steps from any other (freeserf's can_build_military: nothing in the 2 rings round it). */
 export const MILITARY_SPACING = 2;
@@ -148,6 +151,8 @@ export interface Alert {
 /** A knight on his way to garrison a Hut, Tower or Fortress, from the storage that armed him. */
 export interface Knight {
   id: number;
+  /** Set on a reinforcement (a knight sent from one garrison to defend another): his rank. `home` is then the garrison he left. */
+  rank?: number;
   home: number; // the storage he set out from
   building: number; // the building he is walking to
   counter: number; // ticks left on the road
@@ -300,6 +305,7 @@ export interface Building {
   garrison: number; // Hut/Tower/Fortress only: knights currently inside
   veterans: number[]; // of them, how many are rank 1, 2, 3, 4 (the rest are rank 0)
   train: number; // ticks until the garrison next tries to promote a knight
+  want: number; // knights it keeps itself stocked to, 0..capacity (the garrison level; lowering it never sends knights out)
 }
 
 /**

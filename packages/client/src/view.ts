@@ -1492,6 +1492,13 @@ export class View {
     const g = this.gOverlay;
     g.clear();
     const app = this.app;
+    for (const t of game.threatsTo(0)) {
+      // a pulsing red ring round a building of yours that enemy knights are marching on or fighting at
+      const b = game.buildings[t.target]!;
+      const c = this.buildingCentre(game, b);
+      const big = (b.type === BuildingType.Castle ? 52 : buildingSize(b.type) === BuildingSize.Large ? 40 : 24) + 6 + 4 * Math.sin(this.time * 6);
+      g.ellipse(c.x, c.y + 2, big, big / 2).stroke({ width: 4, color: 0xff3b3b, alpha: 0.85 });
+    }
     const sel = app.selection;
     if (sel) {
       if (sel.kind === 'flag') {

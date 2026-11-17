@@ -2,7 +2,7 @@
 // and selection, and every command that changes the sim. The renderer and the
 // panels only read from here.
 
-import { type Alert, BuildingType, Game, Temperament, MapObject, ORE_NAMES, SIGN_EMPTY, buildNeeds, type OreKind, Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
+import { type Alert, AttackPhase, BuildingType, Game, Temperament, MapObject, ORE_NAMES, SIGN_EMPTY, buildNeeds, type OreKind, Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
 import { BUILDING_NAME } from './palette.ts';
 import { type KV, exportSave, importSave, readSave, writeSave } from './persistence.ts';
 import { makeScenario, type ScenarioId } from './scenarios.ts';
@@ -437,6 +437,45 @@ export class App {
     }
     this.commanded();
     this.changed();
+  }
+
+  /** Call your knights back from this enemy building (or from everywhere, with no building). */
+  recall(building = -1): void {
+    const n = this.game.recallAttackers(0, building);
+    this.say(n > 0 ? `Called ${n} knight${n > 1 ? 's' : ''} back.` : 'No knights out there to call back.');
+    this.commanded();
+    this.changed();
+  }
+
+  /** How many of your knights are out attacking (marching, waiting or fighting), and at which building if only one. */
+  attackersOut(building = -1): number {
+    return this.game.attackers.filter((a) => a.owner === 0 && a.phase !== AttackPhase.Returning && (building < 0 || a.target === building)).length;
+  }
+
+  /** Attacks under way against the player's buildings. */
+  threats(): { target: number; attackers: number; fighting: number; eta: number }[] {
+    return this.game.threatsTo(0);
+  }
+
+  /** Set how many knights a garrison building keeps itself stocked to. */
+  setWant(building: number, n: number): void {
+    try {
+      this.game.setGarrisonWant(building, n);
+    } catch (e) {
+      this.say(e instanceof Error ? e.message : String(e));
+    }
+    this.commanded();
+    this.changed();
+  }
+
+  /** Odds of `n` knights going against a building: what they are worth away from home against its defence. */
+  odds(building: number, n: number): { attack: number; defence: number; ratio: number; helpers: number } {
+    const g = this.game;
+    const force = g.attackForce(0, building).slice(0, n);
+    const attack = g.attackPower(0, force);
+    const defence = g.defencePower(building);
+    const own = g.buildings[building]!.garrison;
+    return { attack, defence, ratio: defence === 0 ? Infinity : attack / defence, helpers: Math.max(0, g.defendersOf(building).length - own) };
   }
 
   buildFromMenu(type: BuildingType): void {

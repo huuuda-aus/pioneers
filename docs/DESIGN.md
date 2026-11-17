@@ -391,6 +391,14 @@ them. (There is only ever one castle, and it can't be built.)
   once every tool is stocked three deep (left alone it turned 400 of 507 iron into
   tools) and glut-checks smelters, weaponsmith and gold. The territory scenario's
   ore hill is radius 4 with 60 ore a point, since the old one ran dry.
+  **Defending** (for both sides): while an enemy stands at a building's door, each `HELP_PERIOD` (100 ticks) the
+  nearest other garrison within `HELP_RANGE` (8 steps) with more than one knight sends it its strongest knight, up to
+  the building's capacity (a `Knight` with a `rank`, walking at attacker speed; if the building has been taken or is
+  full when he arrives he goes back home). `defendersOf`/`defencePower` count what neighbours could send, so the AI's
+  odds include them. `recallAttackers` turns attackers round (a duel in progress ends with the defender back inside);
+  `threatsTo` lists enemy marches on an owner's buildings with an arrival time; `Building.want` (the garrison level,
+  1..capacity, default full) stops recruiting at that many and never evicts. The client shows a red banner and pulsing
+  ring for each threatened building, a Recall button, a "Keep N" slider and odds in the attack panel.
   **War**: it sizes a fight before starting one. A target's defence is the sum of its knights' duel strengths at home
   (2^rank x 4096) and its force is the knights `attackForce` would send (nearest garrison first, strongest first) at
   its away morale, which is 1024 plus its share of all gold in the world, so gold in any of its stores is worth up to

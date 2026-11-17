@@ -341,3 +341,96 @@ describe('sizing up a fight', () => {
     expect(g.defencePower(b)).toBe((1 + 8) * 4096);
   });
 });
+
+/** The duel() world plus a second hut of owner 1 `gap` columns beyond its first, with `helper` knights. */
+function withHelper(helper: number, gap = 4) {
+  const w = duel(3, 1);
+  const fc = w.g.addFlag(20 + gap, 10, 1);
+  const c = w.g.addBuilding(T.Hut, fc);
+  w.g.buildings[c]!.garrison = helper;
+  return { ...w, c };
+}
+
+describe('neighbours helping a building under attack', () => {
+  it('a garrison within range sends knights once the enemy is at the door, never below one, never beyond capacity', () => {
+    const { g, b, c } = withHelper(3);
+    g.sendAttack(0, b, 2);
+    let sent = 0;
+    for (let i = 0; i < 6000 && g.attackers.length > 0; i++) {
+      g.update();
+      sent = Math.max(sent, g.knights.filter((k) => k.rank !== undefined && k.building === b).length);
+      expect(g.buildings[c]!.garrison).toBeGreaterThanOrEqual(1);
+      expect(g.buildings[b]!.garrison).toBeLessThanOrEqual(3);
+    }
+    expect(sent).toBeGreaterThan(0);
+  });
+
+  it('one too far away does not', () => {
+    const { g, b } = withHelper(3, 12);
+    g.sendAttack(0, b, 2);
+    let sent = 0;
+    for (let i = 0; i < 6000 && g.attackers.length > 0; i++) {
+      g.update();
+      sent += g.knights.filter((k) => k.rank !== undefined).length;
+    }
+    expect(sent).toBe(0);
+  });
+
+  it('is counted in the defence the AI weighs, up to the building\'s capacity', () => {
+    const { g, b } = withHelper(3);
+    expect(g.defendersOf(b)).toEqual([0, 0, 0]); // its own knight and the two the helper can spare
+    expect(g.defencePower(b)).toBe(3 * 4096);
+    g.buildings[b]!.garrison = 3;
+    expect(g.defendersOf(b)).toEqual([0, 0, 0]); // already full
+  });
+
+  it('a reinforcement that finds the building taken goes home again', () => {
+    const { g, b, c } = withHelper(3);
+    g.knights.push({ id: 99, rank: 2, home: c, building: b, counter: 5, total: 5 });
+    g.buildings[c]!.garrison = 2;
+    g.buildings[b]!.owner = 0; // taken meanwhile
+    g.update();
+    g.update();
+    for (let i = 0; i < 10; i++) g.update();
+    expect(g.knights.length).toBe(0);
+    expect(g.buildings[c]!.garrison).toBe(3);
+    expect(g.buildings[c]!.veterans[1]).toBe(1);
+  });
+
+  it('is saved while walking', () => {
+    const { g, b, c } = withHelper(3);
+    g.knights.push({ id: 7, rank: 3, home: c, building: b, counter: 400, total: 400 });
+    const h = roundtrip(g);
+    expect(h.knights).toEqual(g.knights);
+  });
+});
+
+describe('recalling an attack', () => {
+  it('turns marchers, waiting knights and a duel in progress round, and puts the defender back in', () => {
+    const { g, a, b } = duel(3, 2);
+    g.sendAttack(0, b, 2);
+    expect(g.recallAttackers(0)).toBe(2);
+    expect(g.attackers.every((k) => k.phase === AttackPhase.Returning)).toBe(true);
+    run(g, 2000);
+    expect(g.attackers.length).toBe(0);
+    expect(g.buildings[a]!.garrison).toBe(3); // all home again
+
+    g.sendAttack(0, b, 2);
+    for (let i = 0; i < 6000 && !g.attackers.some((k) => k.phase === AttackPhase.Fighting); i++) g.update();
+    expect(g.attackers.some((k) => k.phase === AttackPhase.Fighting)).toBe(true);
+    const defenders = g.buildings[b]!.garrison; // one stepped out
+    g.recallAttackers(0, b);
+    expect(g.buildings[b]!.garrison).toBe(defenders + 1);
+    expect(g.recallAttackers(0)).toBe(0); // already turning back
+  });
+
+  it('threatsTo reports the knights on their way to a building and the enemy at its door', () => {
+    const { g, b } = duel(3, 2);
+    expect(g.threatsTo(1)).toEqual([]);
+    g.sendAttack(0, b, 2);
+    const [t] = g.threatsTo(1);
+    expect(t).toMatchObject({ target: b, attackers: 2, fighting: 0 });
+    expect(t!.eta).toBeGreaterThan(0);
+    expect(g.threatsTo(0)).toEqual([]);
+  });
+});

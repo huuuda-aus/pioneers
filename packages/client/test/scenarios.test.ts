@@ -289,3 +289,30 @@ describe('the event log', () => {
     expect(app.log).toEqual([]);
   });
 });
+
+describe('defence tools', () => {
+  it('shows threats to you, recalls your own knights, sets the garrison level and sizes up the odds', () => {
+    const app = new App();
+    app.loadScenario('territory');
+    const g = app.game;
+    const mine = g.buildings.find((b) => !b.removed && b.owner === 0 && b.type === BuildingType.Hut && b.garrison > 0)!;
+    const theirs = g.buildings.find((b) => !b.removed && b.owner === 1 && b.type === BuildingType.Hut && b.garrison > 0)!;
+    expect(app.threats()).toEqual([]);
+    expect(app.attackersOut()).toBe(0);
+
+    const odds = app.odds(theirs.index, 2);
+    expect(odds.attack).toBeGreaterThan(0);
+    expect(odds.defence).toBeGreaterThan(0);
+    expect(odds.ratio).toBeCloseTo(odds.attack / odds.defence);
+
+    g.sendAttack(1, mine.index, 2);
+    expect(app.threats()).toMatchObject([{ target: mine.index, attackers: 2 }]);
+    g.sendAttack(0, theirs.index, 1);
+    expect(app.attackersOut(theirs.index)).toBe(1);
+    app.recall(theirs.index);
+    expect(app.attackersOut()).toBe(0);
+
+    app.setWant(mine.index, 1);
+    expect(mine.want).toBe(1);
+  });
+});

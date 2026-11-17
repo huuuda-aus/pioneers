@@ -290,6 +290,7 @@ export function Root({ app }: { app: App }) {
       <div class="stage">
         <div class="canvas-host" ref={host}>
           <FlagMenu app={app} viewRef={viewRef} host={host} />
+          <ThreatBanner app={app} viewRef={viewRef} />
           <div class={app.toast ? 'toast' : 'toast hint'}>
             {app.toast || tool.help}
             {app.hoverInfo() && <div class="hint">{app.hoverInfo()}</div>}
@@ -661,6 +662,9 @@ function AttackPanel({ app, building }: { app: App; building: number }) {
   const [want, setWant] = useState(1);
   const o = app.attackOptions(building);
   const n = Math.max(1, Math.min(want, o.available));
+  const out = app.attackersOut(building);
+  const odds = o.ok ? app.odds(building, n) : null;
+  const tone = !odds ? '' : odds.ratio < 1 ? 'bad' : odds.ratio < 1.3 ? 'warn' : 'ok';
   return (
     <div class="attack">
       {o.ok ? (
@@ -669,12 +673,48 @@ function AttackPanel({ app, building }: { app: App; building: number }) {
             Attack with {n}
           </button>
           <input type="range" min={1} max={o.available} value={n} onInput={(e) => setWant(Number(e.currentTarget.value))} />
-          <span class="hint">
-            {o.available} can go. Strength away {app.game.awayMorale(0)} against their 4096 at home.
-          </span>
+          <span class="hint">{o.available} can go.</span>
+          {odds && (
+            <p class={`hint odds ${tone}`} title="Your knights' duel strength away from home against the defenders' at home (their ranks, plus knights neighbouring garrisons would send). Gold raises yours.">
+              Odds {odds.ratio === Infinity ? 'undefended' : `${odds.ratio.toFixed(1)}×`}: {odds.attack} against {odds.defence}
+              {odds.helpers > 0 && ` (incl. ${odds.helpers} from neighbours)`}
+            </p>
+          )}
         </>
       ) : (
         <p class="hint">Cannot attack: {o.reason}.</p>
+      )}
+      {out > 0 && (
+        <button onClick={() => app.recall(building)} title="Turn your knights round: they walk home, and a duel in progress ends">
+          Recall {out} knight{out > 1 ? 's' : ''}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Attacks on your buildings, with a click to go and look, and a recall for your own knights out there. */
+function ThreatBanner({ app, viewRef }: { app: App; viewRef: { current: View | null } }) {
+  const threats = app.threats();
+  const out = app.attackersOut();
+  if (threats.length === 0 && out === 0) return null;
+  const g = app.game;
+  return (
+    <div class="threat-banner">
+      {threats.slice(0, 3).map((t) => {
+        const b = g.buildings[t.target]!;
+        const secs = Math.round(t.eta / 50);
+        return (
+          <button key={t.target} class="threat" onClick={() => viewRef.current?.focusOn(b.pos >= 0 ? b.pos : g.flags[b.flag]!.pos)}>
+            Under attack: {BUILDING_NAME[b.type]?.toLowerCase()} — {t.attackers} knight{t.attackers > 1 ? 's' : ''}
+            {t.fighting > 0 ? `, ${t.fighting} at the door` : `, ~${secs}s away`}
+          </button>
+        );
+      })}
+      {out > 0 && (
+        <button class="recall" onClick={() => app.recall()}>
+          Recall all {out} of your knights
+        </button>
       )}
     </div>
   );
@@ -749,6 +789,14 @@ function Inspector({ app }: { app: App }) {
             <span title="Held gold raises every knight's strength away from home (4096 = no gold anywhere, even with defenders)">{g.awayMorale(b.owner)}</span>
           </div>
         )}
+        {b.owner === 0 && garrisonCapacityOf(b.type) >= 0 && !b.constructing && (
+          <label class="slider" title="Stops it recruiting once it holds this many. Lowering it never sends knights away: keep rear huts at 1 and fill the one at the front.">
+            <span>Keep</span>
+            <input type="range" min={1} max={garrisonCapacityOf(b.type)} step={1} value={b.want} onInput={(e) => app.setWant(b.index, Number(e.currentTarget.value))} />
+            <span class="value">{b.want}</span>
+          </label>
+        )}
+        {b.owner === 0 && app.threats().some((t) => t.target === b.index) && <p class="hint bad">Enemy knights are attacking this building.</p>}
         {b.owner !== 0 && garrisonCapacityOf(b.type) >= 0 && <AttackPanel app={app} building={b.index} />}
         <table>
           <thead>

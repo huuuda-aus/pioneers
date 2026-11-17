@@ -48,6 +48,49 @@ describe('a hut', () => {
   });
 });
 
+describe('the garrison level', () => {
+  it('stops a building recruiting once it has as many knights as it was told to keep, and never sends any away', () => {
+    const c = new CastleColony();
+    const g = c.g;
+    g.addStock(c.castle, Res.Sword, 20);
+    g.addStock(c.castle, Res.Shield, 20);
+    const hut = g.addBuilding(T.Hut, c.f[0]!);
+    expect(g.buildings[hut]!.want).toBe(3); // by default, full
+    g.setGarrisonWant(hut, 2);
+    run(g, 6000);
+    expect(g.buildings[hut]!.garrison).toBe(2);
+    g.setGarrisonWant(hut, 1); // lowering it does not evict
+    run(g, 3000);
+    expect(g.buildings[hut]!.garrison).toBe(2);
+    g.setGarrisonWant(hut, 3);
+    run(g, 6000);
+    expect(g.buildings[hut]!.garrison).toBe(3);
+  });
+
+  it('is limited to 1..capacity, and only for garrison buildings', () => {
+    const c = new CastleColony();
+    const g = c.g;
+    const hut = g.addBuilding(T.Hut, c.f[0]!);
+    g.setGarrisonWant(hut, 99);
+    expect(g.buildings[hut]!.want).toBe(3);
+    g.setGarrisonWant(hut, 0);
+    expect(g.buildings[hut]!.want).toBe(1);
+    expect(() => g.setGarrisonWant(g.addBuilding(T.Lumberjack, c.f[1]!), 2)).toThrow();
+  });
+
+  it('is saved, and an old save without it loads at full', () => {
+    const c = new CastleColony();
+    const g = c.g;
+    const hut = g.addBuilding(T.Hut, c.f[0]!);
+    g.setGarrisonWant(hut, 2);
+    expect(roundtrip(g).buildings[hut]!.want).toBe(2);
+    const data = g.serialize() as unknown as { buildings: { want?: number }[] };
+    for (const b of data.buildings) delete b.want;
+    const h = Game.restore(JSON.parse(JSON.stringify(data)) as Parameters<typeof Game.restore>[0]);
+    expect(h.buildings[hut]!.want).toBe(3);
+  });
+});
+
 describe('a weaponsmith', () => {
   it('makes swords and shields in roughly equal numbers', () => {
     const c = new CastleColony();
