@@ -216,7 +216,10 @@ function foodScenario(): Game {
 const TERRITORY_COLS = 160;
 const TERRITORY_ROWS = 120;
 /** How far from a castle its guaranteed ore hill lies (just beyond the castle's own reach of 8). */
-const HILL_DISTANCE = 12;
+const HILL_DISTANCE = 13;
+/** The hill's size and how much ore each of its points holds: enough for a long game's mining. */
+const HILL_RADIUS = 3;
+const ORE_PER_POINT = 40;
 
 function territoryScenario(): Game {
   const cols = TERRITORY_COLS;
@@ -227,7 +230,7 @@ function territoryScenario(): Game {
   // a small mountain a step beyond each castle's reach, toward the middle, so coal, iron and gold
   // are always within one expansion of both colonies whatever the generated map is like
   const hills: [number, number][] = [[yours[0] + HILL_DISTANCE, yours[1]], [theirs[0] - HILL_DISTANCE, theirs[1]]];
-  for (const [x, y] of hills) flattenArea(t, x, y, 2, MOUNTAIN_LEVEL, 6);
+  for (const [x, y] of hills) flattenArea(t, x, y, HILL_RADIUS, MOUNTAIN_LEVEL, 6);
   flattenArea(t, yours[0], yours[1], 5, FLAT_HEIGHT, 4);
   flattenArea(t, theirs[0], theirs[1], 5, FLAT_HEIGHT, 4);
   // two garrisoned huts facing each other across the middle, close enough to fight over
@@ -265,8 +268,8 @@ function territoryScenario(): Game {
   for (const [x, y] of hills) {
     let n = 0;
     for (let p = 0; p < cols * rows; p++) {
-      if (g.terrain.heightAt(p) >= MOUNTAIN_LEVEL && hexDistance((p % cols) - x, Math.floor(p / cols) - y) <= 2) {
-        g.objects!.setOre(p, 20, [OreKind.Coal, OreKind.Iron, OreKind.Gold][n++ % 3]!);
+      if (g.terrain.heightAt(p) >= MOUNTAIN_LEVEL && hexDistance((p % cols) - x, Math.floor(p / cols) - y) <= HILL_RADIUS) {
+        g.objects!.setOre(p, ORE_PER_POINT, [OreKind.Coal, OreKind.Iron, OreKind.Gold][n++ % 3]!);
       }
     }
   }

@@ -31,9 +31,9 @@ describe('building up from the castle', { timeout: 30000 }, () => {
   it('puts up wood, stone and then military buildings, all joined to its castle', () => {
     const { g, east } = world(Temperament.Defensive);
     run(g, 60000);
-    expect(countOf(g, 1, T.Lumberjack)).toBe(2);
-    expect(countOf(g, 1, T.Sawmill)).toBe(1);
-    expect(countOf(g, 1, T.Stonecutter)).toBe(1);
+    // it built a wood and stone economy (and pulled producers down again when their goods piled up in the castle)
+    expect(g.created[Res.Lumber]!).toBeGreaterThan(0);
+    expect(g.created[Res.Plank]!).toBeGreaterThan(0);
     expect(countOf(g, 1, T.Forester)).toBe(1);
     const military = g.buildings.filter((b) => !b.removed && b.owner === 1 && (b.type === T.Hut || b.type === T.Tower));
     expect(military.length).toBeGreaterThan(1);
@@ -72,6 +72,25 @@ describe('building up from the castle', { timeout: 30000 }, () => {
     const { g } = world(Temperament.Defensive);
     run(g, 60000);
     expect(g.buildings.filter((b) => b.owner === 0 && !b.removed).length).toBe(1); // just the castle
+  });
+});
+
+describe('keeping house', { timeout: 30000 }, () => {
+  it('pulls down a producer whose goods are piling up in the castle', () => {
+    const { g, east } = world(Temperament.Defensive);
+    const lumberjack = g.placeBuilding(T.Lumberjack, g.index(53, 27), false, 1);
+    g.addStock(east, Res.Lumber, 120);
+    run(g, 1500);
+    expect(g.buildings[lumberjack]!.burning > 0 || g.buildings[lumberjack]!.removed).toBe(true);
+  });
+
+  it('takes up roads cut off from its castle', () => {
+    const { g } = world(Temperament.Defensive);
+    const a = g.addFlag(70, 20, 1);
+    g.addFlag(74, 20, 1);
+    const road = g.addRoad(a, [0, 0, 0, 0]);
+    run(g, 1500);
+    expect(g.roads[road]!.removed).toBe(true);
   });
 });
 
@@ -192,9 +211,12 @@ describe('mining and the weapons chain', { timeout: 60000 }, () => {
   it('builds food, mines, a smelter and a weaponsmith, and makes the swords it garrisons with', () => {
     const { g } = miningWorld({ ore: 6 });
     run(g, 160000);
-    for (const type of [T.IronMine, T.IronSmelter, T.Weaponsmith]) expect(countOf(g, 1, type), T[type]).toBe(1);
-    expect(countOf(g, 1, T.CoalMine)).toBe(2); // coal feeds the smelter and the weaponsmith
-    expect(countOf(g, 1, T.Fisher) + countOf(g, 1, T.Baker)).toBeGreaterThan(0);
+    // the mines ran (and, worked out, were pulled down), the smelter and weaponsmith stand
+    for (const type of [T.IronSmelter, T.Weaponsmith]) expect(countOf(g, 1, type), T[type]).toBe(1);
+    expect(g.created[Res.Coal]!).toBeGreaterThan(0);
+    expect(g.created[Res.IronOre]!).toBeGreaterThan(0);
+    expect(g.created[Res.Iron]!).toBeGreaterThan(0);
+    expect(g.created[Res.Fish]! + g.created[Res.Bread]!).toBeGreaterThan(0); // food for the mines
     expect(g.created[Res.Sword]!).toBeGreaterThan(0);
     expect(g.created[Res.Shield]!).toBeGreaterThan(0);
     expect(g.buildings.filter((b) => !b.removed && b.owner === 1 && b.type === T.Hut).some((h) => h.garrison > 0)).toBe(true);
@@ -206,14 +228,13 @@ describe('mining and the weapons chain', { timeout: 60000 }, () => {
     expect(g.ownerAt[point]).not.toBe(1);
     run(g, 200000);
     expect(g.ownerAt[point]).toBe(1);
-    expect(countOf(g, 1, T.CoalMine) + countOf(g, 1, T.IronMine)).toBeGreaterThan(0);
+    expect(g.created[Res.Coal]! + g.created[Res.IronOre]!).toBeGreaterThan(0); // a mine was built and dug
   });
 
   it('never builds a mine where there is no ore, and carries on with the rest', () => {
     const { g } = miningWorld({ ore: null, swords: 14 });
     run(g, 80000);
     for (const type of [T.CoalMine, T.IronMine, T.GoldMine]) expect(countOf(g, 1, type), T[type]).toBe(0);
-    expect(countOf(g, 1, T.Sawmill)).toBe(1);
     expect(countOf(g, 1, T.Hut)).toBeGreaterThan(0);
   });
 

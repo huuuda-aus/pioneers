@@ -4,7 +4,7 @@
 // own (a countdown, a temperament, when it was last attacked): every decision
 // is a function of the game and `hash01`, so a saved game replays exactly.
 
-import { BuildingType, Res, garrisonCapacityOf, toolFor, type AiPlayer, type Building, Temperament } from './types.ts';
+import { BState, BuildingType, Res, garrisonCapacityOf, toolFor, type AiPlayer, type Building, Temperament } from './types.ts';
 import { hexDistance } from './terrain.ts';
 import { checkBuilding, checkFlag } from './placement.ts';
 import { planRoad } from './plan.ts';
@@ -37,14 +37,30 @@ const ECONOMY: [BuildingType, number][] = [
   [BuildingType.Forester, 1],
 ];
 
+/**
+ * A producer is pulled down when the castle already holds this much of what it makes, and not put up again
+ * until the stock falls to half of it: a store that fills (castle capacity is 150) leaves its goods stuck on
+ * the flags, which then block everything else, so the AI must not run its producers into a glut.
+ */
+const GLUT: Partial<Record<BuildingType, [Res, number]>> = {
+  [BuildingType.Lumberjack]: [Res.Lumber, 100],
+  [BuildingType.Sawmill]: [Res.Plank, 100],
+  [BuildingType.Stonecutter]: [Res.Stone, 100],
+  [BuildingType.Fisher]: [Res.Fish, 100],
+  [BuildingType.CoalMine]: [Res.Coal, 100],
+  [BuildingType.IronMine]: [Res.IronOre, 60],
+  [BuildingType.GoldMine]: [Res.GoldOre, 60],
+};
+
 const isMilitaryType = (t: BuildingType): boolean => t !== BuildingType.Castle && garrisonCapacityOf(t) >= 0;
 
 export const aiPeriod = (ai: AiPlayer): number => KNOBS[ai.temperament].period;
 
 /** Everything it still wants to build before soldiers, in order: wood and stone, food, mines, then the metal and weapons chain. */
-function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number): BuildingType[] {
+function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number, working: (t: BuildingType) => number): BuildingType[] {
   const T = BuildingType;
   const out: BuildingType[] = [];
+  const stock = g.buildings[g.castleOf(ai.owner)]!.stock;
   for (const [type, want] of ECONOMY) for (let i = count(type); i < want; i++) out.push(type);
   // food the mines will eat: fish if there is water to be had, else the bread chain
   if (count(T.Fisher) === 0 && count(T.Baker) === 0) {
@@ -55,7 +71,7 @@ function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number): Buil
   // each link only once what feeds it stands: no smelter before its mine
   // coal feeds the smelters and the weaponsmith: one mine is not enough once all of them run
   const chain: BuildingType[] = [T.CoalMine, T.IronMine];
-  if (count(T.Weaponsmith) > 0 && count(T.CoalMine) < 2) out.push(T.CoalMine);
+  if (count(T.Weaponsmith) > 0 && working(T.CoalMine) < 2) out.push(T.CoalMine);
   if (count(T.IronMine) > 0) chain.push(T.IronSmelter);
   if (count(T.IronSmelter) > 0) {
     if (g.tools) chain.push(T.Toolmaker);
@@ -66,8 +82,13 @@ function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number): Buil
     chain.push(T.GoldMine);
     if (count(T.GoldMine) > 0) chain.push(T.GoldSmelter);
   }
-  for (const t of chain) if (count(t) === 0) out.push(t);
-  return out;
+  // a mine that has dug out its ore is replaced where there is more
+  for (const t of chain) if ((oreKindOf(t) !== OreKind.None ? working(t) : count(t)) === 0) out.push(t);
+  // nothing that would add to a pile it already has
+  return out.filter((t) => {
+    const glut = GLUT[t];
+    return !glut || stock[glut[0]]! < glut[1] / 2;
+  });
 }
 
 /** One decision: the first thing that can be done is done. */
@@ -77,6 +98,41 @@ export function aiStep(g: Game, ai: AiPlayer): void {
   const own = g.buildings.filter((b) => !b.removed && b.burning === 0 && b.owner === ai.owner);
   const count = (t: BuildingType): number => own.filter((b) => b.type === t).length;
   const sites = own.filter((b) => b.constructing).length;
+  const working = (t: BuildingType): number => own.filter((b) => b.type === t && (b.constructing || b.state !== BState.NoResource)).length;
+
+  // a producer whose goods are piling up in the castle is pulled down before they clog the roads
+  const castleStock = g.buildings[castle]!.stock;
+  for (const b of own) {
+    const glut = GLUT[b.type];
+    if (glut && !b.constructing && castleStock[glut[0]]! >= glut[1]) {
+      g.demolishBuilding(b.index);
+      return;
+    }
+  }
+
+  // a mine that has dug out its ore is pulled down: it hands its pick back, and the next one goes where ore is left
+  const spent = own.find((b) => !b.constructing && oreKindOf(b.type) !== OreKind.None && b.state === BState.NoResource);
+  if (spent) {
+    g.demolishBuilding(spent.index);
+    return;
+  }
+
+  // roads cut off from its castle (one half of a network that land changing hands split) are taken up: a road that
+  // can never get a carrier stops the whole game's hiring for the step, so they must not be left standing
+  const reach = reachableFlags(g, g.buildings[castle]!.flag);
+  const orphans = g.roads.filter((r) => !r.removed && r.owner === ai.owner && !reach.has(r.flag[0]));
+  if (orphans.length > 0) {
+    for (const r of orphans) g.demolishRoad(r.index);
+    return;
+  }
+
+  // a site cut off from its castle (a road lost when land changed hands) is joined again, or given up so it stops holding a slot
+  for (const b of own) {
+    if (!b.constructing || b.pos < 0) continue;
+    if (g.walkRoute(g.buildings[castle]!.flag, b.flag)) continue;
+    if (!connect(g, ai.owner, b.flag)) g.demolishBuilding(b.index);
+    return;
+  }
 
   if (sites < MAX_SITES) {
     // where the ore it needs lies, when none of it is on its own land: its soldiers head there
@@ -85,11 +141,11 @@ export function aiStep(g: Game, ai: AiPlayer): void {
     const mines: [BuildingType, OreKind][] = [[BuildingType.CoalMine, OreKind.Coal], [BuildingType.IronMine, OreKind.Iron]];
     if (ai.temperament !== Temperament.Peaceful) mines.push([BuildingType.GoldMine, OreKind.Gold]);
     for (const [mine, kind] of mines) {
-      if (seek >= 0 || count(mine) > 0 || findSite(g, ai, mine) >= 0) continue; // already has, or can place one now
+      if (seek >= 0 || working(mine) > 0 || findSite(g, ai, mine) >= 0) continue; // already has, or can place one now
       seek = nearestOreSpot(g, kind, home);
     }
     const tried = new Set<BuildingType>();
-    for (const type of wanted(g, ai, count)) {
+    for (const type of wanted(g, ai, count, working)) {
       if (tried.has(type)) continue;
       tried.add(type);
       const kind = oreKindOf(type);
@@ -100,7 +156,7 @@ export function aiStep(g: Game, ai: AiPlayer): void {
     }
     const military = own.filter((b) => isMilitaryType(b.type));
     const building = military.filter((b) => b.constructing).length;
-    if (building === 0 && military.length < KNOBS[ai.temperament].cap + (seek >= 0 ? SEEK_EXTRA : 0) && count(BuildingType.Sawmill) > 0) {
+    if (building === 0 && military.length < KNOBS[ai.temperament].cap + (seek >= 0 ? SEEK_EXTRA : 0)) {
       // towers soak up six swords each: not while it is short of them on the way to ore
       const tower = seek < 0 && military.length >= 3 && affordable(g, ai.owner, castle, BuildingType.Tower);
       const type = tower ? BuildingType.Tower : BuildingType.Hut;
@@ -126,6 +182,23 @@ function nearestOreSpot(g: Game, kind: OreKind, from: number): number {
     }
   }
   return best;
+}
+
+/** The flags joined to `from` by road. */
+function reachableFlags(g: Game, from: number): Set<number> {
+  const seen = new Set<number>([from]);
+  const queue = [from];
+  for (let head = 0; head < queue.length; head++) {
+    for (const ri of g.flags[queue[head]!]!.road) {
+      if (ri < 0 || g.roads[ri]!.removed) continue;
+      const r = g.roads[ri]!;
+      for (const f of r.flag) if (!seen.has(f)) {
+        seen.add(f);
+        queue.push(f);
+      }
+    }
+  }
+  return seen;
 }
 
 /** Can the castle pay for it right now, and is there a tool for its worker? (The AI does not queue sites it cannot supply.) */
@@ -203,6 +276,7 @@ function findSite(g: Game, ai: AiPlayer, type: BuildingType, seek = -1): number 
     if (g.ownerAt[p] !== ai.owner) continue;
     const d0 = dist(g, p, castle.pos);
     if (d0 < 3) continue;
+    if (ore !== OreKind.None && !(g.objects && g.objects.oreNear(p, ore) > 0)) continue; // a mine only where there is ore to dig
     let score: number;
     if (military) {
       if (ownMilitary.some((m) => dist(g, p, m.pos) < 4)) continue;
@@ -219,7 +293,6 @@ function findSite(g: Game, ai: AiPlayer, type: BuildingType, seek = -1): number 
   let tried = 0;
   for (const c of cands) {
     if (tried++ > 400) break;
-    if (ore !== OreKind.None && !(g.objects && g.objects.oreNear(c.p, ore) > 0)) continue;
     if (!checkBuilding(g, type, c.p, ai.owner).ok) continue;
     if (military) return c.p;
     // wood and stone only where there is some to work: the best of the first few that fit
@@ -239,8 +312,9 @@ function findSite(g: Game, ai: AiPlayer, type: BuildingType, seek = -1): number 
 /** Join a new door flag to the nearest flag of its own that a road can reach, with a flag every other tile. */
 function connect(g: Game, owner: number, flag: number): boolean {
   const here = g.flags[flag]!.pos;
+  const reach = reachableFlags(g, g.buildings[g.castleOf(owner)]!.flag); // only to what its castle can already reach
   const near = g.flags
-    .filter((f) => !f.removed && f.owner === owner && f.index !== flag)
+    .filter((f) => !f.removed && f.owner === owner && f.index !== flag && reach.has(f.index))
     .sort((a, b) => dist(g, a.pos, here) - dist(g, b.pos, here) || a.index - b.index)
     .slice(0, 4);
   for (const f of near) {

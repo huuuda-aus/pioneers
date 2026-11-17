@@ -370,10 +370,18 @@ them. (There is only ever one castle, and it can't be built.)
   it, and a building whose worker's tool is not in stock beyond what its
   placed buildings still need is not queued. When the ore it wants is not on
   its land it expands toward the nearest of it instead of toward the enemy,
-  with huts only and a few more military buildings allowed. **Not yet**: more
+  with huts only and a few more military buildings allowed. **Housekeeping**,
+  from watching it stall: it pulls down a producer once the castle holds 100
+  of what it makes (60 of ore) and does not rebuild it until the stock halves,
+  because a full store (castle capacity is 150) leaves goods stuck on the
+  flags and blocks everything; it pulls down a mine that has dug out its ore,
+  which gives its pick back, and builds the next where ore is left; roads cut
+  off from its castle are taken up (a road that can never get a carrier stops
+  all hiring for the step) and new roads only join flags its castle reaches; a
+  site cut off from its castle is rejoined or given up. **Not yet**: more
   than one of anything, demolition, repairs, a second storage, and expanding
-  cleverly (the territory scenario guarantees a small mountain of coal, iron
-  and gold 12 steps from each castle, just beyond its reach, so one hut is
+  cleverly (the territory scenario guarantees a mountain of coal, iron
+  and gold (radius 3, 40 ore a point) 13 steps from each castle, just beyond its reach, so one hut is
   enough; its map is otherwise random, and both castles also start with 40
   swords and shields). TypeScript only.
 - **Parity**: `logistics/` is the C++ original of the logistics economy. `pnpm gen:parity`
