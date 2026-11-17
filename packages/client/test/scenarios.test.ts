@@ -145,7 +145,23 @@ describe('two colonies', () => {
     expect(g.buildings[g.castleOf(0)]!.stock[Res.Gold]).toBe(6);
     expect(g.awayMorale(0)).toBe(11264); // an even split of the world's gold
     expect(g.ais.map((x) => x.owner)).toEqual([1]); // the rival is a computer player
-    expect(g.buildings[g.castleOf(1)]!.stock[Res.Sword]).toBe(16);
+    expect(g.buildings[g.castleOf(1)]!.stock[Res.Sword]).toBe(40);
+  });
+
+  it('always has coal, iron and gold on a hill just beyond each colony\'s reach', () => {
+    const g = makeScenario('territory');
+    for (const owner of [0, 1]) {
+      const c = g.buildings[g.castleOf(owner)]!;
+      for (const kind of [OreKind.Coal, OreKind.Iron, OreKind.Gold]) {
+        let nearest = Infinity;
+        for (let p = 0; p < g.cols * g.rows; p++) {
+          if (g.objects!.ore[p]! > 0 && g.objects!.oreKind[p] === kind) {
+            nearest = Math.min(nearest, hexDistance((p % g.cols) - (c.pos % g.cols), Math.floor(p / g.cols) - Math.floor(c.pos / g.cols)));
+          }
+        }
+        expect(nearest, `owner ${owner} kind ${kind}`).toBeLessThanOrEqual(14);
+      }
+    }
   });
 
   it('plays through an attack from the app: toasts, march, duel', () => {

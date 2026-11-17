@@ -7,6 +7,7 @@ import {
   Dir,
   FLAT_HEIGHT,
   Game,
+  MOUNTAIN_LEVEL,
   OreKind,
   Temperament,
   Terrain,
@@ -214,6 +215,8 @@ function foodScenario(): Game {
 // opponent's colony to grow into, all of it visible (no fog of war yet).
 const TERRITORY_COLS = 160;
 const TERRITORY_ROWS = 120;
+/** How far from a castle its guaranteed ore hill lies (just beyond the castle's own reach of 8). */
+const HILL_DISTANCE = 12;
 
 function territoryScenario(): Game {
   const cols = TERRITORY_COLS;
@@ -221,6 +224,10 @@ function territoryScenario(): Game {
   const t = generateTerrain({ cols, rows, seed: SEED });
   const yours: [number, number] = [20, 60];
   const theirs: [number, number] = [140, 60];
+  // a small mountain a step beyond each castle's reach, toward the middle, so coal, iron and gold
+  // are always within one expansion of both colonies whatever the generated map is like
+  const hills: [number, number][] = [[yours[0] + HILL_DISTANCE, yours[1]], [theirs[0] - HILL_DISTANCE, theirs[1]]];
+  for (const [x, y] of hills) flattenArea(t, x, y, 2, MOUNTAIN_LEVEL, 6);
   flattenArea(t, yours[0], yours[1], 5, FLAT_HEIGHT, 4);
   flattenArea(t, theirs[0], theirs[1], 5, FLAT_HEIGHT, 4);
   // two garrisoned huts facing each other across the middle, close enough to fight over
@@ -237,8 +244,13 @@ function territoryScenario(): Game {
   g.addStock(g.castleOf(1), Res.Gold, 6);
   // swords and shields to arm knights with (nobody mines for them yet), for you and the opponent alike
   for (const owner of [0, 1]) {
-    g.addStock(g.castleOf(owner), Res.Sword, 16);
-    g.addStock(g.castleOf(owner), Res.Shield, 16);
+    g.addStock(g.castleOf(owner), Res.Sword, 40);
+    g.addStock(g.castleOf(owner), Res.Shield, 40);
+  }
+  // a few spare tools, so the smelter, a toolmaker and a weaponsmith can all have a worker
+  for (const owner of [0, 1]) {
+    g.addStock(g.castleOf(owner), Res.Hammer, 2);
+    g.addStock(g.castleOf(owner), Res.Pick, 2);
   }
   g.addAi(1, Temperament.Defensive);
   front.forEach(([x, y], owner) => {
@@ -250,5 +262,13 @@ function territoryScenario(): Game {
     hexDistance((p % cols) - yours[0], Math.floor(p / cols) - yours[1]) <= 3 ||
     hexDistance((p % cols) - theirs[0], Math.floor(p / cols) - theirs[1]) <= 3;
   addObjects(g, clear);
+  for (const [x, y] of hills) {
+    let n = 0;
+    for (let p = 0; p < cols * rows; p++) {
+      if (g.terrain.heightAt(p) >= MOUNTAIN_LEVEL && hexDistance((p % cols) - x, Math.floor(p / cols) - y) <= 2) {
+        g.objects!.setOre(p, 20, [OreKind.Coal, OreKind.Iron, OreKind.Gold][n++ % 3]!);
+      }
+    }
+  }
   return g;
 }

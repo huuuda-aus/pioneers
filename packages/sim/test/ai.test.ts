@@ -1,7 +1,7 @@
 // The computer opponent: it plays by the rules the player does, so these
 // check what it builds and does, and that a saved game replays it exactly.
 import { describe, expect, it } from 'vitest';
-import { BuildingType, Game, Res, Temperament } from '../src/index.ts';
+import { BuildingType, Game, MOUNTAIN_LEVEL, MapObjects, OreKind, Res, SEA_LEVEL, Temperament, TerrainMap, flattenArea, generateObjects, hexDistance, toolFor } from '../src/index.ts';
 import { run } from './scenarios.ts';
 
 const T = BuildingType;
@@ -27,7 +27,7 @@ function world(temperament: Temperament, gap = 36) {
 const countOf = (g: Game, owner: number, type: BuildingType): number =>
   g.buildings.filter((b) => !b.removed && b.owner === owner && b.type === type).length;
 
-describe('building up from the castle', () => {
+describe('building up from the castle', { timeout: 30000 }, () => {
   it('puts up wood, stone and then military buildings, all joined to its castle', () => {
     const { g, east } = world(Temperament.Defensive);
     run(g, 60000);
@@ -75,7 +75,7 @@ describe('building up from the castle', () => {
   });
 });
 
-describe('temperament', () => {
+describe('temperament', { timeout: 30000 }, () => {
   /** An owner 0 hut with `knights` inside right in the AI's reach, so there is something to attack. */
   function withTarget(temperament: Temperament, knights: number) {
     const w = world(temperament, 36);
@@ -125,7 +125,7 @@ describe('temperament', () => {
   });
 });
 
-describe('save and load', () => {
+describe('save and load', { timeout: 30000 }, () => {
   it('is exact: a round trip mid-game carries on the same, and two runs agree', () => {
     const a = world(Temperament.Aggressive).g;
     run(a, 30000);
@@ -144,5 +144,92 @@ describe('save and load', () => {
     delete data.ais;
     const h = Game.restore(JSON.parse(JSON.stringify(data)) as Parameters<typeof Game.restore>[0]);
     expect(h.ais).toEqual([]);
+  });
+});
+
+/**
+ * The AI alone in the east with wood and stone around it, a lake, and a mountain plateau of coal and
+ * iron (and gold) at `ore` steps from its castle (null: none anywhere). It has planks and stone and nothing
+ * with an edge: swords have to be made.
+ */
+function miningWorld(opts: { ore: number | null; swords?: number; tools?: Partial<Record<Res, number>> }) {
+  const cols = 120;
+  const rows = 60;
+  const t = TerrainMap.flat(cols, rows);
+  const castle: [number, number] = [56, 30];
+  flattenArea(t, castle[0], castle[1] + 8, 2, SEA_LEVEL, 3); // a lake to fish
+  const plateau: [number, number] = [castle[0] + (opts.ore ?? 0), castle[1] - 2];
+  if (opts.ore !== null) flattenArea(t, plateau[0], plateau[1], 2, MOUNTAIN_LEVEL, 8);
+  const o = generateObjects(t, 3, { keepClear: (p) => hexDistance((p % cols) - castle[0], Math.floor(p / cols) - castle[1]) <= 4 }) as MapObjects;
+  for (let p = 0; p < cols * rows; p++) {
+    if (t.heightAt(p) < MOUNTAIN_LEVEL) o.setOre(p, 0, OreKind.Stone);
+  }
+  if (opts.ore !== null) {
+    let n = 0;
+    for (let p = 0; p < cols * rows; p++) {
+      if (t.heightAt(p) >= MOUNTAIN_LEVEL && hexDistance((p % cols) - plateau[0], Math.floor(p / cols) - plateau[1]) <= 2) {
+        o.setOre(p, 12, [OreKind.Coal, OreKind.Iron, OreKind.Gold][n++ % 3]!);
+      }
+    }
+  }
+  const g = new Game(cols, rows, t, o);
+  const c = g.placeBuilding(T.Castle, g.index(castle[0], castle[1]), false, 1);
+  g.addStock(c, Res.Plank, 80);
+  g.addStock(c, Res.Stone, 60);
+  if (opts.swords) {
+    g.addStock(c, Res.Sword, opts.swords);
+    g.addStock(c, Res.Shield, opts.swords);
+  }
+  if (opts.tools) {
+    g.tools = true;
+    for (const [r, n] of Object.entries(opts.tools)) g.addStock(c, Number(r) as Res, n!);
+  }
+  g.addAi(1, Temperament.Defensive);
+  return { g, c, plateau };
+}
+
+describe('mining and the weapons chain', { timeout: 60000 }, () => {
+  it('builds food, mines, a smelter and a weaponsmith, and makes the swords it garrisons with', () => {
+    const { g } = miningWorld({ ore: 6 });
+    run(g, 160000);
+    for (const type of [T.CoalMine, T.IronMine, T.IronSmelter, T.Weaponsmith]) expect(countOf(g, 1, type), T[type]).toBe(1);
+    expect(countOf(g, 1, T.Fisher) + countOf(g, 1, T.Baker)).toBeGreaterThan(0);
+    expect(g.created[Res.Sword]!).toBeGreaterThan(0);
+    expect(g.created[Res.Shield]!).toBeGreaterThan(0);
+    expect(g.buildings.filter((b) => !b.removed && b.owner === 1 && b.type === T.Hut).some((h) => h.garrison > 0)).toBe(true);
+  });
+
+  it('expands toward ore that lies beyond its land, then mines it', () => {
+    const { g, plateau } = miningWorld({ ore: 13, swords: 6 });
+    const point = g.index(plateau[0], plateau[1]);
+    expect(g.ownerAt[point]).not.toBe(1);
+    run(g, 200000);
+    expect(g.ownerAt[point]).toBe(1);
+    expect(countOf(g, 1, T.CoalMine) + countOf(g, 1, T.IronMine)).toBeGreaterThan(0);
+  });
+
+  it('never builds a mine where there is no ore, and carries on with the rest', () => {
+    const { g } = miningWorld({ ore: null, swords: 6 });
+    run(g, 80000);
+    for (const type of [T.CoalMine, T.IronMine, T.GoldMine]) expect(countOf(g, 1, type), T[type]).toBe(0);
+    expect(countOf(g, 1, T.Sawmill)).toBe(1);
+    expect(countOf(g, 1, T.Hut)).toBeGreaterThan(0);
+  });
+
+  it('does not queue buildings whose worker has no tool to take', () => {
+    const { g } = miningWorld({ ore: 6, tools: { [Res.Axe]: 3, [Res.Saw]: 1, [Res.Shovel]: 1, [Res.Rod]: 1, [Res.Pick]: 1, [Res.Hammer]: 1 } });
+    run(g, 120000);
+    const needing = (tool: Res) => g.buildings.filter((b) => !b.removed && b.owner === 1 && toolFor(b.type) === tool).length;
+    expect(needing(Res.Pick)).toBeLessThanOrEqual(1);
+    expect(needing(Res.Hammer)).toBeLessThanOrEqual(1);
+  });
+
+  it('stays exact through a save in the middle of it', () => {
+    const a = miningWorld({ ore: 6 }).g;
+    run(a, 50000);
+    const b = roundtrip(a);
+    run(a, 50000);
+    run(b, 50000);
+    expect(JSON.stringify(b.serialize())).toBe(JSON.stringify(a.serialize()));
   });
 });

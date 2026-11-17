@@ -355,10 +355,21 @@ them. (There is only ever one castle, and it can't be built.)
   than the target holds; aggressive attacks the weakest garrison in reach
   whenever it can send one more knight than it holds. Its state is just
   `{owner, temperament, cooldown, provoked}`, saved; every choice is a
-  function of the game and `hash01`, so a saved game replays exactly. **Not
-  yet**: mining, smelting, weaponsmith or food (the scenario stocks swords,
-  shields and gold in both castles), demolition, repairs, a second storage.
-  TypeScript only.
+  function of the game and `hash01`, so a saved game replays exactly. **After
+  that it makes its own weapons**: food for the mines (a fisher if it can site
+  one, else farm, mill, well and baker), a coal and an iron mine on land
+  that has that ore under it (it reads `objects`, a geologist for free), an iron
+  smelter, a toolmaker (when workers need tools) and a weaponsmith, and for a
+  fighting temperament a gold mine and smelter. Each link waits for what feeds
+  it, and a building whose worker's tool is not in stock beyond what its
+  placed buildings still need is not queued. When the ore it wants is not on
+  its land it expands toward the nearest of it instead of toward the enemy,
+  with huts only and a few more military buildings allowed. **Not yet**: more
+  than one of anything, demolition, repairs, a second storage, and expanding
+  cleverly (the territory scenario guarantees a small mountain of coal, iron
+  and gold 12 steps from each castle, just beyond its reach, so one hut is
+  enough; its map is otherwise random, and both castles also start with 40
+  swords and shields). TypeScript only.
 - **Parity**: `logistics/` is the C++ original of the logistics economy. `pnpm gen:parity`
   runs it over 19 scenarios and stores the results plus a state fingerprint
   (FNV hash of every flag, carrier, building and counter) in
