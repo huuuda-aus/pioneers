@@ -309,6 +309,30 @@ them. (There is only ever one castle, and it can't be built.)
   matters once there's a fight to resolve. Hut/Tower/Fortress and Weaponsmith
   have no art of their own yet; they borrow the smelter's shape, tinted.
   TypeScript only.
+- **Combat** (`Game.sendAttack`, `updateAttackers`): from a garrison with more
+  than one knight (`MIN_GARRISON`; the last never leaves) knights can be sent
+  against an enemy finished Hut/Tower/Fortress within 16 steps (`checkAttack`;
+  the castle has no garrison yet, so it can't be attacked). They march
+  straight over the land, one defender steps out and they duel for 300 ticks:
+  a single deterministic roll (`hash01` on attacker id and tick, so a save
+  replays the same fight), win chance `morale / (morale + defender's)`, equal
+  for now so a fair coin. The loser dies; a surviving defender goes back in.
+  With no defender left an attacker occupies the building
+  (`captureBuilding`, from freeserf's `occupy_enemy_building`): it and its
+  door flag change owner, its roads are cut, its stock is lost, recruits
+  heading for it are lost, and the territory recompute tears down whatever of
+  the old owner's now stands on land that changed hands. The other attackers
+  go home. Alerts (`game.alerts`, not saved) tell the player about attacks,
+  captures and losses. **Strength**: a knight fights with `2^rank` times a land
+  factor: 4096 on his own land, else his owner's *away morale*, 1024 plus
+  `10240 * players` times that owner's share of all the gold held in buildings
+  (freeserf's `update_knight_morale`; 4096, an even fight, when there is no
+  gold at all). **Ranks** 0 to 4 (`Building.veterans`, counts at rank 1..4):
+  a garrison keeps up to 2/4/8 gold (delivered by the normal logistics) and
+  every 1500 ticks spends one to promote its lowest knight a step; without
+  gold a slow `hash01` roll does it for free (freeserf's training odds,
+  scaled). The strongest knight goes out to attack and to defend. No castle
+  garrison, retreat or threat-level matrix yet. TypeScript only.
 - **Parity**: `logistics/` is the C++ original of the logistics economy. `pnpm gen:parity`
   runs it over 19 scenarios and stores the results plus a state fingerprint
   (FNV hash of every flag, carrier, building and counter) in

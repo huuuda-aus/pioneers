@@ -4,6 +4,16 @@
 // parity tests pin the two together.
 
 import {
+  ATTACK_RANGE,
+  HOME_MORALE,
+  RANK_MAX,
+  TRAIN_TICKS,
+  goldCapacityOf,
+  AttackPhase,
+  type Alert,
+  type Attacker,
+  FIGHT_TICKS,
+  MIN_GARRISON,
   BState,
   BUILD_UNIT_TICKS,
   BURN_TICKS,
@@ -101,6 +111,9 @@ const closenessOf = (dx: number, dy: number): number => Math.max(0, 9 - hexDista
 
 /** How often an under-strength Hut/Tower/Fortress tries again for another knight. */
 const KNIGHT_RECRUIT_PERIOD = 300;
+
+/** Chance per TRAIN_TICKS that a garrison without gold promotes its lowest knight, by his rank (freeserf's training odds, scaled to the shorter period). */
+const TRAIN_CHANCE = [0.0152, 0.0076, 0.0038, 0.0019];
 
 /** One letter per building for render(). */
 const GLYPH: Record<BuildingType, string> = {
@@ -333,7 +346,10 @@ function initOperation(b: Building): void {
     case BuildingType.Hut:
     case BuildingType.Tower:
     case BuildingType.Fortress:
-      break; // no production: a garrison, handled by updateGarrison
+      // no production, a garrison (updateGarrison); it just keeps some gold for promotions and morale
+      b.inGroups = [[Res.Gold]];
+      b.maxIn = goldCapacityOf(b.type);
+      break;
   }
 }
 
@@ -384,6 +400,11 @@ export class Game {
   /** Knights walking to garrison a Hut/Tower/Fortress. Removed on arrival (or if it stops wanting them). */
   knights: Knight[] = [];
   private nextKnight = 0;
+  /** Knights sent against an enemy building. */
+  attackers: Attacker[] = [];
+  private nextAttacker = 0;
+  /** Things the screen should tell the player about: the client reads and clears it. Not saved. */
+  alerts: Alert[] = [];
   /** Ore a geologist has just found: the screen reads it and clears it. Not saved. */
   discoveries: { pos: number; kind: OreKind }[] = [];
   /** What the toolmakers should make: a weight per tool kind (index into TOOL_KINDS), 0 to TOOL_MAX. */
@@ -742,6 +763,8 @@ export class Game {
       burning: 0,
       removed: false,
       garrison: 0,
+      veterans: [0, 0, 0, 0],
+      train: 0,
     };
     if (construct) setNeeds(b);
     else {
@@ -1115,6 +1138,7 @@ export class Game {
     this.updateHomebound(this.speed);
     if (this.geologists.length > 0) this.updateGeologists(this.speed);
     if (this.knights.length > 0) this.updateKnights(this.speed);
+    if (this.attackers.length > 0) this.updateAttackers(this.speed);
   }
 
   private updateHomebound(delta: number): void {
@@ -1729,12 +1753,23 @@ export class Game {
    * asking for another — retrying every KNIGHT_RECRUIT_PERIOD.
    */
   private updateGarrison(b: Building, delta: number): void {
+    this.trainKnights(b, delta);
     if (b.garrison >= garrisonCapacityOf(b.type)) return;
     b.counter -= delta;
     if (b.counter > 0) return;
     b.counter = KNIGHT_RECRUIT_PERIOD;
     if (this.knights.some((k) => k.building === b.index)) return;
     this.hireKnight(b);
+  }
+
+  /** Put knights straight into a finished Hut/Tower/Fortress (a script setting up a scenario), claiming its land at once. */
+  setGarrison(building: number, knights: number): void {
+    const b = this.buildings[building]!;
+    const cap = garrisonCapacityOf(b.type);
+    if (cap < 0 || b.constructing) throw new Error('not a finished garrison');
+    b.garrison = Math.max(0, Math.min(cap, Math.floor(knights)));
+    if (b.veterans.reduce((n, v) => n + v, 0) > b.garrison) b.veterans = [0, 0, 0, 0];
+    if (b.pos >= 0) this.updateLandOwnership(b.pos);
   }
 
   /** Arms a knight from the nearest storage with a sword and a shield in stock, and sends him walking. */
@@ -1762,7 +1797,7 @@ export class Game {
       if (k.counter > 0) return true;
       const b = this.buildings[k.building];
       if (b && !b.removed && b.burning === 0 && garrisonCapacityOf(b.type) >= 0) {
-        b.garrison++;
+        this.addKnight(b, 0);
         if (b.garrison === 1 && b.pos >= 0) this.updateLandOwnership(b.pos); // its first knight: now it defends land
       }
       return false;
@@ -1975,6 +2010,8 @@ export class Game {
       nextGeologist: this.nextGeologist,
       knights: this.knights,
       nextKnight: this.nextKnight,
+      attackers: this.attackers,
+      nextAttacker: this.nextAttacker,
       flags: this.flags,
       roads: this.roads,
       buildings: this.buildings,
@@ -2036,10 +2073,14 @@ export class Game {
     g.nextGeologist = d.nextGeologist ?? g.geologists.length;
     g.knights = d.knights ?? [];
     g.nextKnight = d.nextKnight ?? g.knights.length;
+    g.attackers = (d.attackers ?? []).map((a) => ({ ...a, rank: a.rank ?? 0, defRank: a.defRank ?? -1 }));
+    g.nextAttacker = d.nextAttacker ?? g.attackers.length;
     g.flags = d.flags;
     g.roads = d.roads;
     g.buildings = d.buildings;
     for (const b of g.buildings) {
+      b.veterans ??= [0, 0, 0, 0];
+      b.train ??= 0;
       for (const key of ['stock', 'requested', 'incoming', 'need', 'used'] as const) b[key] = padRes(b[key]);
       b.foodWeight ??= FOOD_MAX;
       b.hasTool ??= false;
@@ -2347,6 +2388,257 @@ export class Game {
       }
     }
     this.layoutVersion++;
+  }
+
+  // ---- combat ------------------------------------------------------------
+
+  /** Where a building stands on the map (its door flag's point for one with no point of its own). */
+  private posOf(b: Building): number {
+    return b.pos >= 0 ? b.pos : this.flags[b.flag]!.pos;
+  }
+
+  // -- ranks, training and morale
+
+  /** How many knights of a garrison are at each rank 0..RANK_MAX. */
+  knightRanks(b: Building): number[] {
+    const out = [0, ...b.veterans];
+    out[0] = Math.max(0, b.garrison - b.veterans.reduce((n, v) => n + v, 0));
+    return out;
+  }
+
+  /** A knight leaves a garrison (the strongest, or the weakest): his rank. */
+  private takeKnight(b: Building, strongest = true): number {
+    const ranks = this.knightRanks(b);
+    let r = -1;
+    if (strongest) {
+      for (let k = RANK_MAX; k >= 0 && r < 0; k--) if (ranks[k]! > 0) r = k;
+    } else {
+      for (let k = 0; k <= RANK_MAX && r < 0; k++) if (ranks[k]! > 0) r = k;
+    }
+    if (r < 0) r = 0;
+    if (r > 0) b.veterans[r - 1]!--;
+    b.garrison--;
+    return r;
+  }
+
+  private addKnight(b: Building, rank: number): void {
+    b.garrison++;
+    if (rank > 0) b.veterans[rank - 1]!++;
+  }
+
+  /** Promote the lowest-ranked knight one step; false if every knight is already at the top. */
+  private promoteOne(b: Building): boolean {
+    const ranks = this.knightRanks(b);
+    for (let k = 0; k < RANK_MAX; k++) {
+      if (ranks[k]! > 0) {
+        if (k > 0) b.veterans[k - 1]!--;
+        b.veterans[k]!++;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Every TRAIN_TICKS a garrison promotes a knight: with gold in store it spends one, otherwise by a slow deterministic chance. */
+  private trainKnights(b: Building, delta: number): void {
+    if (b.garrison <= 0) return;
+    b.train -= delta;
+    if (b.train > 0) return;
+    b.train = TRAIN_TICKS;
+    if (b.stock[Res.Gold]! > 0) {
+      if (this.promoteOne(b)) {
+        b.stock[Res.Gold]!--;
+        this.consumed[Res.Gold]!++;
+      }
+      return;
+    }
+    const ranks = this.knightRanks(b);
+    for (let k = 0; k < RANK_MAX; k++) {
+      if (ranks[k]! > 0) {
+        if (hash01(b.index * 131 + k, this.tick, 0x7a) < TRAIN_CHANCE[k]!) this.promoteOne(b);
+        return;
+      }
+    }
+  }
+
+  /** How strong an owner's knights are away from home: 1024 plus their share of the world's gold, as in freeserf. */
+  awayMorale(owner: number): number {
+    let mine = 0;
+    let all = 0;
+    for (const b of this.buildings) {
+      if (b.removed) continue;
+      const g = b.stock[Res.Gold]!;
+      all += g;
+      if (b.owner === owner) mine += g;
+    }
+    if (all === 0) return HOME_MORALE;
+    const players = Math.max(2, this.castleByOwner.size);
+    return Math.max(1, Math.min(0xffff, 1024 + Math.floor((10 * 1024 * players * mine) / all)));
+  }
+
+  /** A knight's strength in a duel: double per rank, times how at home his side is. */
+  private strengthOf(owner: number, rank: number, atHome: boolean): number {
+    return (1 << rank) * (atHome ? HOME_MORALE : this.awayMorale(owner));
+  }
+
+  /** The garrisons that could send knights at `target`, nearest first, with how many each can spare. */
+  private attackSources(owner: number, target: Building): { index: number; spare: number }[] {
+    const out: { index: number; spare: number; d: number }[] = [];
+    const tp = this.posOf(target);
+    for (const b of this.buildings) {
+      if (b.removed || b.burning > 0 || b.constructing || b.owner !== owner || garrisonCapacityOf(b.type) < 0) continue;
+      const spare = b.garrison - MIN_GARRISON;
+      const d = distanceBetween(this.cols, this.posOf(b), tp);
+      if (spare > 0 && d <= ATTACK_RANGE) out.push({ index: b.index, spare, d });
+    }
+    out.sort((x, y) => x.d - y.d || x.index - y.index);
+    return out;
+  }
+
+  /** How many knights `owner` could send against this building right now. */
+  availableKnights(owner: number, target: number): number {
+    const t = this.buildings[target];
+    if (!t) return 0;
+    return this.attackSources(owner, t).reduce((n, s) => n + s.spare, 0);
+  }
+
+  /** Can `owner` attack this building? Only a finished enemy Hut, Tower or Fortress, and only with knights to spare nearby. */
+  checkAttack(owner: number, target: number): Check {
+    const t = this.buildings[target];
+    if (!t || t.removed || t.burning > 0) return { ok: false, reason: 'no such building' };
+    if (garrisonCapacityOf(t.type) < 0) return { ok: false, reason: 'only a hut, tower or fortress can be attacked' };
+    if (t.owner === owner) return { ok: false, reason: 'that is your own building' };
+    if (t.constructing) return { ok: false, reason: 'it is not finished yet' };
+    if (this.availableKnights(owner, target) <= 0) return { ok: false, reason: 'no knights to spare within reach' };
+    return { ok: true, reason: '' };
+  }
+
+  /** Send up to `count` knights from the nearest garrisons that can spare them. */
+  sendAttack(owner: number, target: number, count: number): number {
+    const c = this.checkAttack(owner, target);
+    if (!c.ok) throw new Error(c.reason);
+    const t = this.buildings[target]!;
+    const tp = this.posOf(t);
+    let left = Math.max(1, Math.floor(count));
+    let sent = 0;
+    for (const s of this.attackSources(owner, t)) {
+      const home = this.buildings[s.index]!;
+      const hp = this.posOf(home);
+      const total = Math.max(1, distanceBetween(this.cols, hp, tp)) * STEP_TICKS;
+      for (let i = 0; i < s.spare && left > 0; i++, left--, sent++) {
+        const rank = this.takeKnight(home);
+        this.attackers.push({ id: this.nextAttacker++, owner, home: s.index, target, phase: AttackPhase.Marching, from: hp, to: tp, counter: total, total, rank, defRank: -1 });
+      }
+    }
+    this.alerts.push({ kind: 'attacked', owner: t.owner, building: target });
+    return sent;
+  }
+
+  /** Send him back where he came from, along the way he came if he had not arrived. */
+  private startReturn(a: Attacker): void {
+    const home = this.buildings[a.home]!;
+    if (a.phase === AttackPhase.Marching) {
+      const walked = a.total - a.counter;
+      [a.from, a.to] = [a.to, a.from];
+      a.counter = walked;
+    } else {
+      const hp = this.posOf(home);
+      a.from = a.to;
+      a.to = hp;
+      a.total = Math.max(1, distanceBetween(this.cols, a.from, hp)) * STEP_TICKS;
+      a.counter = a.total;
+    }
+    a.phase = AttackPhase.Returning;
+  }
+
+  private updateAttackers(delta: number): void {
+    const stay: Attacker[] = [];
+    for (const a of this.attackers) {
+      const t = this.buildings[a.target];
+      const valid = !!t && !t.removed && t.burning === 0 && t.owner !== a.owner && garrisonCapacityOf(t.type) >= 0;
+      if (a.phase !== AttackPhase.Returning && !valid) this.startReturn(a);
+
+      if (a.phase === AttackPhase.Marching) {
+        a.counter -= delta;
+        if (a.counter <= 0) {
+          a.phase = AttackPhase.Waiting;
+          a.from = a.to;
+          a.counter = a.total = 0;
+        }
+      }
+      if (a.phase === AttackPhase.Waiting) {
+        const busy = this.attackers.some((o) => o !== a && o.phase === AttackPhase.Fighting && o.target === a.target);
+        if (!busy) {
+          if (t!.garrison > 0) {
+            a.defRank = this.takeKnight(t!); // a defender steps out
+            a.phase = AttackPhase.Fighting;
+            a.counter = a.total = FIGHT_TICKS;
+          } else {
+            this.captureBuilding(t!, a);
+            continue; // he is the garrison now
+          }
+        }
+      } else if (a.phase === AttackPhase.Fighting) {
+        a.counter -= delta;
+        if (a.counter <= 0) {
+          const mine = this.strengthOf(a.owner, a.rank, this.ownerAt[this.posOf(t!)] === a.owner);
+          const theirs = this.strengthOf(t!.owner, a.defRank, this.ownerAt[this.posOf(t!)] === t!.owner);
+          const wins = hash01(a.id * 977 + a.target, this.tick, 0xa7) < mine / (mine + theirs);
+          if (wins) {
+            a.phase = AttackPhase.Waiting; // the defender is dead: on to the next
+            a.defRank = -1;
+            a.counter = a.total = 0;
+          } else {
+            this.addKnight(t!, a.defRank); // the defender goes back in; the attacker is dead
+            continue;
+          }
+        }
+      } else if (a.phase === AttackPhase.Returning) {
+        a.counter -= delta;
+        if (a.counter <= 0) {
+          const home = this.buildings[a.home];
+          if (home && !home.removed && home.burning === 0 && home.owner === a.owner && garrisonCapacityOf(home.type) >= 0) this.addKnight(home, a.rank);
+          continue;
+        }
+      }
+      stay.push(a);
+    }
+    this.attackers = stay;
+  }
+
+  /** The last defender is gone and an attacker stands at the door: the building is his (ported from freeserf's occupy_enemy_building). */
+  private captureBuilding(t: Building, a: Attacker): void {
+    const loser = t.owner;
+    const f = this.flags[t.flag]!;
+    for (const ri of f.road) if (ri >= 0 && !this.roads[ri]!.removed) this.demolishRoad(ri);
+    for (const it of f.slot) this.destroyItem(it);
+    f.slot = f.slot.map(() => emptyItem());
+    for (const fl of this.flags) {
+      for (const it of fl.slot) {
+        if (it.type !== Res.None && it.dest === f.index) {
+          it.dest = -1;
+          it.dir = Dir.None;
+        }
+      }
+    }
+    for (const tr of this.transporters) if (tr.item.type !== Res.None && tr.item.dest === f.index) tr.item.dest = -1;
+    for (let r = 0; r < RES_COUNT; r++) {
+      this.lost[r]! += t.stock[r]!;
+      t.stock[r] = 0;
+      t.requested[r] = 0;
+    }
+    this.knights = this.knights.filter((k) => k.building !== t.index); // the old owner's recruits on the road are lost
+    t.owner = a.owner;
+    f.owner = a.owner;
+    t.garrison = 0;
+    t.veterans = [0, 0, 0, 0];
+    this.addKnight(t, a.rank); // the occupant, with his rank
+    t.counter = 0;
+    this.layoutVersion++;
+    this.updateLandOwnership(this.posOf(t));
+    this.alerts.push({ kind: 'captured', owner: a.owner, building: t.index });
+    this.alerts.push({ kind: 'lost', owner: loser, building: t.index });
+    for (const o of this.attackers) if (o !== a && o.target === t.index && o.phase !== AttackPhase.Returning) this.startReturn(o);
   }
 
   // ---- territory ---------------------------------------------------------

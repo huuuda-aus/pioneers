@@ -61,6 +61,66 @@ describe('a weaponsmith', () => {
   });
 });
 
+describe('training', () => {
+  it('spends gold to promote the lowest-ranked knight, one step per period', () => {
+    const c = new CastleColony();
+    const g = c.g;
+    const hut = g.addBuilding(T.Hut, c.f[0]!);
+    const b = g.buildings[hut]!;
+    b.garrison = 3;
+    g.addStock(hut, Res.Gold, 2);
+    run(g, 40);
+    expect(b.stock[Res.Gold]).toBe(1);
+    expect(g.knightRanks(b)).toEqual([2, 1, 0, 0, 0]);
+    run(g, 1000); // the next period
+    expect(b.stock[Res.Gold]).toBe(0);
+    expect(g.knightRanks(b)).toEqual([1, 2, 0, 0, 0]); // the lowest first
+    expect(g.consumed[Res.Gold]).toBe(2);
+  });
+
+  it('never promotes beyond rank 4, and keeps its gold when there is nobody to promote', () => {
+    const c = new CastleColony();
+    const g = c.g;
+    const hut = g.addBuilding(T.Hut, c.f[0]!);
+    const b = g.buildings[hut]!;
+    b.garrison = 1;
+    b.veterans = [0, 0, 0, 1];
+    g.addStock(hut, Res.Gold, 2);
+    run(g, 4000);
+    expect(g.knightRanks(b)).toEqual([0, 0, 0, 0, 1]);
+    expect(b.stock[Res.Gold]).toBe(2); // nobody left to promote: the gold stays
+  });
+
+  it('asks for gold through the normal logistics, up to its capacity', () => {
+    const c = new CastleColony();
+    const g = c.g;
+    g.addStock(c.castle, Res.Gold, 10);
+    const hut = g.addBuilding(T.Hut, c.f[0]!);
+    run(g, 6000);
+    expect(g.buildings[hut]!.stock[Res.Gold]! + g.buildings[hut]!.requested[Res.Gold]!).toBeLessThanOrEqual(2);
+    expect(g.buildings[hut]!.stock[Res.Gold]).toBe(2);
+  });
+
+  it('without gold, promotion by time is slow, deterministic, and saved exactly', () => {
+    const make = () => {
+      const c = new CastleColony();
+      const hut = c.g.addBuilding(T.Hut, c.f[0]!);
+      c.g.buildings[hut]!.garrison = 3;
+      return { g: c.g, hut };
+    };
+    const a = make();
+    run(a.g, 120000);
+    const b = make();
+    run(b.g, 60000);
+    const copy = roundtrip(b.g);
+    run(b.g, 60000);
+    run(copy, 60000);
+    expect(JSON.stringify(b.g.serialize())).toBe(JSON.stringify(a.g.serialize()));
+    expect(JSON.stringify(copy.serialize())).toBe(JSON.stringify(a.g.serialize()));
+    expect(a.g.buildings[a.hut]!.veterans.reduce((n, v) => n + v, 0)).toBeGreaterThan(0);
+  });
+});
+
 describe('save and load', () => {
   it('a round trip keeps garrison counts and every knight on the road', () => {
     const c = new CastleColony();

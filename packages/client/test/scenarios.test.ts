@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { BuildingType, FLAT_HEIGHT, HARVEST_RADIUS, MapObject, OreKind, Res, UNCLAIMED, hexDistance } from '@sett/sim';
 import { makeScenario } from '../src/scenarios.ts';
+import { App } from '../src/app.ts';
 
 describe('new game', () => {
   const g = makeScenario('new');
@@ -132,6 +133,28 @@ describe('two colonies', () => {
     let unclaimed = 0;
     for (const o of g.ownerAt) if (o === UNCLAIMED) unclaimed++;
     expect(unclaimed).toBeGreaterThan(0); // there is a no man's land between them
+  });
+
+  it('has a garrisoned hut each facing the other, and you can attack theirs', () => {
+    const g = makeScenario('territory');
+    const huts = g.buildings.filter((b) => b.type === BuildingType.Hut);
+    expect(huts.map((h) => [h.owner, h.garrison])).toEqual([[0, 3], [1, 3]]);
+    const theirs = huts.find((h) => h.owner === 1)!;
+    expect(g.checkAttack(0, theirs.index).ok).toBe(true);
+    expect(g.availableKnights(0, theirs.index)).toBe(2);
+    expect(g.buildings[g.castleOf(0)]!.stock[Res.Gold]).toBe(6);
+    expect(g.awayMorale(0)).toBe(11264); // an even split of the world's gold
+  });
+
+  it('plays through an attack from the app: toasts, march, duel', () => {
+    const app = new App('territory', null);
+    const theirs = app.game.buildings.find((b) => b.type === BuildingType.Hut && b.owner === 1)!;
+    expect(app.attackOptions(theirs.index)).toMatchObject({ ok: true, available: 2 });
+    app.attackTarget(theirs.index, 2);
+    expect(app.game.attackers.length).toBe(2);
+    for (let i = 0; i < 6000; i++) app.frame(20);
+    expect(app.game.attackers.length).toBe(0);
+    expect(app.toast).toMatch(/captured|lost|under attack|Sent/i);
   });
 
   it('runs: owner 0 is a playable colony like any other new game', () => {

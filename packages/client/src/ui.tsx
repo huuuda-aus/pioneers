@@ -26,6 +26,8 @@ import {
   harvestKindOf,
   acceptsAll,
   isStore,
+  garrisonCapacityOf,
+  goldCapacityOf,
 } from '@sett/sim';
 import type { App, Tool } from './app.ts';
 import { BUILDING_COLOR, BUILDING_NAME, RES_COLOR } from './palette.ts';
@@ -64,9 +66,9 @@ const BUILD: ToolInfo[] = [
   { id: 'toolmaker', label: 'Toolmaker', key: 'p', help: 'Needs 3 planks and 2 stone. Makes a tool from one iron and one plank. Every new worker needs a tool; a demolished building gives its tool back.' },
   { id: 'goldsmelter', label: 'Gold smelter', key: 'o', help: 'Needs 2 planks and 2 stone. Melts one gold ore with one coal into one gold.' },
   { id: 'weaponsmith', label: 'Weaponsmith', key: 'l', help: 'Needs 2 planks and 2 stone. Melts one coal and one iron into a sword or a shield, whichever is behind. Arms the knights garrisoning a hut, tower or fortress.' },
-  { id: 'hut', label: 'Hut', key: 'd', help: 'Needs 2 planks and 1 stone. Claims the land around it once a knight garrisons it (up to 3). Weakest claim of the three.' },
-  { id: 'tower', label: 'Tower', key: 'j', help: 'Needs 3 planks and 3 stone. Garrisons up to 6 knights; claims more land than a hut.' },
-  { id: 'fortress', label: 'Fortress', key: 'k', help: 'Needs 5 planks and 5 stone. Garrisons up to 12 knights; claims as much land as the castle.' },
+  { id: 'hut', label: 'Hut', key: 'd', help: 'Needs 2 planks and 1 stone. Claims the land around it once a knight garrisons it (up to 3). Weakest claim of the three. Keeps up to 2 gold to promote knights.' },
+  { id: 'tower', label: 'Tower', key: 'j', help: 'Needs 3 planks and 3 stone. Garrisons up to 6 knights; claims more land than a hut. Keeps up to 4 gold to promote knights.' },
+  { id: 'fortress', label: 'Fortress', key: 'k', help: 'Needs 5 planks and 5 stone. Garrisons up to 12 knights; claims as much land as the castle. Keeps up to 8 gold to promote knights.' },
 ];
 
 const ALL_TOOLS: ToolInfo[] = [...TOOLS, ...BUILD];
@@ -592,6 +594,30 @@ function Stats({ game }: { game: Game }) {
   );
 }
 
+/** Send knights against an enemy hut, tower or fortress: how many, and why not when none can go. */
+function AttackPanel({ app, building }: { app: App; building: number }) {
+  const [want, setWant] = useState(1);
+  const o = app.attackOptions(building);
+  const n = Math.max(1, Math.min(want, o.available));
+  return (
+    <div class="attack">
+      {o.ok ? (
+        <>
+          <button class="primary" onClick={() => app.attackTarget(building, n)} title="Knights march over the land, fight its defenders one by one, and take it if none is left">
+            Attack with {n}
+          </button>
+          <input type="range" min={1} max={o.available} value={n} onInput={(e) => setWant(Number(e.currentTarget.value))} />
+          <span class="hint">
+            {o.available} can go. Strength away {app.game.awayMorale(0)} against their 4096 at home.
+          </span>
+        </>
+      ) : (
+        <p class="hint">Cannot attack: {o.reason}.</p>
+      )}
+    </div>
+  );
+}
+
 function Inspector({ app }: { app: App }) {
   const g = app.game;
   const sel = app.selection;
@@ -642,6 +668,22 @@ function Inspector({ app }: { app: App }) {
             </>
           )}
         </div>
+        {garrisonCapacityOf(b.type) >= 0 && !b.constructing && (
+          <div class="kv">
+            <span>Knights</span>
+            <span>
+              {b.garrison} of {garrisonCapacityOf(b.type)}
+              {b.veterans.some((v) => v > 0) && ` (ranks ${g.knightRanks(b).map((n, r) => (n > 0 ? `${r}×${n}` : '')).filter(Boolean).join(', ')})`}
+            </span>
+            <span>Gold</span>
+            <span>
+              {b.stock[Res.Gold]} of {goldCapacityOf(b.type)}
+            </span>
+            <span>Away strength</span>
+            <span title="Held gold raises every knight's strength away from home (4096 = no gold anywhere, even with defenders)">{g.awayMorale(b.owner)}</span>
+          </div>
+        )}
+        {b.owner !== 0 && garrisonCapacityOf(b.type) >= 0 && <AttackPanel app={app} building={b.index} />}
         <table>
           <thead>
             <tr>

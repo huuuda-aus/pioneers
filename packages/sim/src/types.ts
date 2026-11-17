@@ -98,6 +98,39 @@ export enum TState { Idle, Walking, Arriving }
 
 export enum GeoPhase { Coming, Out, Probing, Home, Done }
 
+export const MIN_GARRISON = 1; // a building never sends out its last knight
+export const ATTACK_RANGE = 16; // steps from one of your garrisons to a target you may attack
+export const FIGHT_TICKS = 300; // one duel
+
+export const RANK_MAX = 4; // knight ranks 0..4, each twice as strong as the one below
+export const TRAIN_TICKS = 1500; // a garrison tries to promote a knight this often
+export const HOME_MORALE = 4096; // a knight's land factor on his own ground
+/** Gold a garrison keeps for promotions and morale (freeserf's max_gold). */
+export const GOLD_CAPACITY: Partial<Record<BuildingType, number>> = {};
+export enum AttackPhase { Marching, Waiting, Fighting, Returning }
+
+/** A knight sent against an enemy building: marches over the land, duels its defenders one at a time, then goes home (or occupies the building). */
+export interface Attacker {
+  id: number;
+  owner: number;
+  home: number; // the building he set out from
+  target: number; // the building he is attacking
+  phase: AttackPhase;
+  from: number; // map point he set out from this leg
+  to: number; // map point he is walking to this leg
+  counter: number; // ticks left in this phase
+  total: number; // length of this phase
+  rank: number; // his rank
+  defRank: number; // rank of the defender he is fighting, -1 when none
+}
+
+/** Something the player should hear about: an attack on, or a change of hands of, one of their buildings. */
+export interface Alert {
+  kind: 'attacked' | 'captured' | 'lost';
+  owner: number; // who it concerns
+  building: number;
+}
+
 /** A knight on his way to garrison a Hut, Tower or Fortress, from the storage that armed him. */
 export interface Knight {
   id: number;
@@ -166,6 +199,10 @@ export const GARRISON_CAPACITY: Partial<Record<BuildingType, number>> = {
   [BuildingType.Tower]: 6,
   [BuildingType.Fortress]: 12,
 };
+GOLD_CAPACITY[BuildingType.Hut] = 2;
+GOLD_CAPACITY[BuildingType.Tower] = 4;
+GOLD_CAPACITY[BuildingType.Fortress] = 8;
+export const goldCapacityOf = (type: BuildingType): number => GOLD_CAPACITY[type] ?? 0;
 export const garrisonCapacityOf = (type: BuildingType): number => GARRISON_CAPACITY[type] ?? -1;
 
 /** The tool a worker of this building needs, or None (a store, a carrier, a well, a mill, a baker need none). */
@@ -246,6 +283,8 @@ export interface Building {
   removed: boolean;
   owner: number; // whose colony this building belongs to, 0 by default
   garrison: number; // Hut/Tower/Fortress only: knights currently inside
+  veterans: number[]; // of them, how many are rank 1, 2, 3, 4 (the rest are rank 0)
+  train: number; // ticks until the garrison next tries to promote a knight
 }
 
 /**

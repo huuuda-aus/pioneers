@@ -297,6 +297,14 @@ export class App {
       const found = g.discoveries.splice(0);
       this.say(`Your geologist found ${[...new Set(found.map((d) => ORE_NAMES[d.kind]))].join(' and ')}!`);
     }
+    if (g.alerts.length > 0) {
+      const mine = g.alerts.splice(0).filter((a) => a.owner === 0);
+      const last = mine[mine.length - 1];
+      if (last) {
+        const name = BUILDING_NAME[g.buildings[last.building]!.type]!.toLowerCase();
+        this.say(last.kind === 'attacked' ? `Your ${name} is under attack!` : last.kind === 'captured' ? `You captured an enemy ${name}!` : `You lost a ${name}!`);
+      }
+    }
     this.sinceSave += dtMs;
     if (this.storage) {
       if (this.commandPending && this.sinceSave >= SAVE_DEBOUNCE_MS) this.saveNow();
@@ -361,6 +369,23 @@ export class App {
   }
 
   /** The player picked a building in the Build list: a site goes up here, its door on this flag. */
+  /** Why the player cannot attack this building now (empty if they can), and how many knights could go. */
+  attackOptions(building: number): { ok: boolean; reason: string; available: number } {
+    const c = this.game.checkAttack(0, building);
+    return { ok: c.ok, reason: c.reason, available: c.ok ? this.game.availableKnights(0, building) : 0 };
+  }
+
+  attackTarget(building: number, count: number): void {
+    try {
+      const n = this.game.sendAttack(0, building, count);
+      this.say(`Sent ${n} knight${n > 1 ? 's' : ''} to attack.`);
+    } catch (e) {
+      this.say(e instanceof Error ? e.message : String(e));
+    }
+    this.commanded();
+    this.changed();
+  }
+
   buildFromMenu(type: BuildingType): void {
     const m = this.menu;
     if (!m) return;

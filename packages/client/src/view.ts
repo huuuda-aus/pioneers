@@ -7,6 +7,7 @@
 
 import { Application, Container, Culler, FillGradient, Graphics, Matrix, Sprite, Text, Texture } from 'pixi.js';
 import {
+  AttackPhase,
   BState,
   BuilderState,
   GeoPhase,
@@ -1272,6 +1273,36 @@ export class View {
       scene.push({
         key: valueAt(geo.flat, u) + 0.6,
         draw: () => drawPerson(g, p.x, p.y, { action: 'walk', phase: (u * S) / (8 * CURVE_K), facing, trade: 'builder' }),
+      });
+    }
+    // knights sent against an enemy building: marching straight over the land, duelling at its door, or coming home
+    for (const a of game.attackers) {
+      const id = -2_000_000 - a.id;
+      const from = posToWorld(game, a.from);
+      const to = posToWorld(game, a.to);
+      const walking = a.phase === AttackPhase.Marching || a.phase === AttackPhase.Returning;
+      const k = walking && a.total > 0 ? clamp(1 - Math.max(0, a.counter - alpha * game.speed) / a.total, 0, 1) : 1;
+      const p = { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k };
+      const fighting = a.phase === AttackPhase.Fighting;
+      // one at the door duels; the rest wait a little to the side
+      const side = a.phase === AttackPhase.Waiting ? (a.id % 5) * 9 - 18 : 0;
+      let tag = this.walkerTags.get(id);
+      if (!tag) {
+        tag = new Text({
+          text: 'At',
+          style: { fill: 0xffffff, fontSize: 15, fontWeight: '700', fontFamily: 'system-ui, sans-serif', stroke: { color: 0x000000, width: 3 } },
+        });
+        tag.anchor.set(0.5, 1);
+        this.labelLayer.addChild(tag);
+        this.walkerTags.set(id, tag);
+      }
+      tag.position.set(p.x + side, p.y - 28);
+      used.add(id);
+      const row = flatY(Math.floor((a.phase === AttackPhase.Returning ? a.to : a.from) / game.cols)) + 0.6;
+      const facing: 1 | -1 = to.x >= from.x ? 1 : -1;
+      scene.push({
+        key: row,
+        draw: () => drawPerson(g, p.x + side, p.y, { action: fighting ? 'work' : walking ? 'walk' : 'idle', phase: fighting ? this.time * 7 : (Math.hypot(to.x - from.x, to.y - from.y) * k) / 8, facing, trade: 'builder' }),
       });
     }
     for (const [i, t] of this.walkerTags) {

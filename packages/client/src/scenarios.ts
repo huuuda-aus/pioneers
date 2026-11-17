@@ -26,7 +26,7 @@ export const SCENARIOS: { id: ScenarioId; name: string; help: string }[] = [
   { id: 'new', name: 'New game', help: 'Just the castle on fresh terrain, as in the original. Build out from it.' },
   { id: 'food', name: 'Food and mining', help: 'The whole food chain, built: fisher, farm, mill, well and baker feed a stone mine on the mountain. Cut a road and watch the mine starve.' },
   { id: 'demo', name: 'Running colony', help: 'A working chain: two lumberjacks, a sawmill and the castle. Add more with the tools.' },
-  { id: 'territory', name: 'Two colonies', help: 'Your castle and a second, untouched one far to the east: watch the tinted land each one claims.' },
+  { id: 'territory', name: 'Two colonies', help: 'Your castle in the west, a rival\'s far to the east, and a garrisoned hut each facing the other in the middle. Select theirs and attack.' },
 ];
 
 const COLS = 48;
@@ -64,12 +64,12 @@ function addObjects(g: Game, clear: (pos: number) => boolean): void {
 }
 
 /** The free spot nearest to (x, y) where `type` may be built, or -1. */
-function findSite(g: Game, type: BuildingType, x: number, y: number): number {
+function findSite(g: Game, type: BuildingType, x: number, y: number, owner = 0): number {
   let best = -1;
   let bestD = Infinity;
   for (let p = 0; p < g.cols * g.rows; p++) {
     const d = hexDistance((p % g.cols) - x, Math.floor(p / g.cols) - y);
-    if (d < bestD && checkBuilding(g, type, p).ok) {
+    if (d < bestD && checkBuilding(g, type, p, owner).ok) {
       best = p;
       bestD = d;
     }
@@ -222,12 +222,23 @@ function territoryScenario(): Game {
   const theirs: [number, number] = [140, 60];
   flattenArea(t, yours[0], yours[1], 5, FLAT_HEIGHT, 4);
   flattenArea(t, theirs[0], theirs[1], 5, FLAT_HEIGHT, 4);
+  // two garrisoned huts facing each other across the middle, close enough to fight over
+  const front: [number, number][] = [[70, 60], [84, 60]];
+  for (const [x, y] of front) flattenArea(t, x, y, 3, FLAT_HEIGHT, 3);
   const g = new Game(cols, rows, t);
   g.limits = { ...DEFAULT_LIMITS };
   g.settlers = true;
   g.tools = true;
   placeCastle(g, yours[0], yours[1], 0);
   placeCastle(g, theirs[0], theirs[1], 1);
+  // some gold on both sides: it raises each army's strength away from home and promotes knights
+  g.addStock(g.castleOf(0), Res.Gold, 6);
+  g.addStock(g.castleOf(1), Res.Gold, 6);
+  front.forEach(([x, y], owner) => {
+    const p = findSite(g, BuildingType.Hut, x, y, owner);
+    if (p < 0) throw new Error('scenario: no site for the front-line hut');
+    g.setGarrison(g.placeBuilding(BuildingType.Hut, p, false, owner), 3);
+  });
   const clear = (p: number): boolean =>
     hexDistance((p % cols) - yours[0], Math.floor(p / cols) - yours[1]) <= 3 ||
     hexDistance((p % cols) - theirs[0], Math.floor(p / cols) - theirs[1]) <= 3;
