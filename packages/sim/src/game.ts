@@ -677,7 +677,7 @@ export class Game {
         }
         tiles.push(pos);
       }
-      const step = checkRoadStep(this, prev, pos);
+      const step = checkRoadStep(this, prev, pos, a.owner);
       if (!step.ok) throw new Error(step.reason);
     }
     const to = this.flagAt[pos]!;
@@ -2547,6 +2547,36 @@ export class Game {
     const t = this.buildings[target];
     if (!t) return 0;
     return this.attackSources(owner, t).reduce((n, s) => n + s.spare, 0);
+  }
+
+  /**
+   * The ranks of the knights `sendAttack` would send at this building, in the order it would send them: nearest
+   * garrison first, each giving its strongest knights. Empty when it cannot be attacked.
+   */
+  attackForce(owner: number, target: number): number[] {
+    const t = this.buildings[target];
+    if (!t || !this.checkAttack(owner, target).ok) return [];
+    const out: number[] = [];
+    for (const s of this.attackSources(owner, t)) {
+      const ranks = this.knightRanks(this.buildings[s.index]!);
+      let left = s.spare;
+      for (let k = RANK_MAX; k >= 0 && left > 0; k--) {
+        for (let i = 0; i < ranks[k]! && left > 0; i++, left--) out.push(k);
+      }
+    }
+    return out;
+  }
+
+  /** How strong a building's defenders are at home (the sum of their duel strengths). */
+  defencePower(target: number): number {
+    const t = this.buildings[target];
+    if (!t) return 0;
+    return this.knightRanks(t).reduce((n, count, rank) => n + count * this.strengthOf(t.owner, rank, true), 0);
+  }
+
+  /** What knights of these ranks of `owner` are worth in a fight away from home. */
+  attackPower(owner: number, ranks: number[]): number {
+    return ranks.reduce((n, rank) => n + this.strengthOf(owner, rank, false), 0);
   }
 
   /** Can `owner` attack this building? Only a finished enemy Hut, Tower or Fortress, and only with knights to spare nearby. */

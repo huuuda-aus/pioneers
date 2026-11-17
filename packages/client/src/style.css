@@ -128,3 +128,9 @@ th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .build-row.off:hover { border-color: transparent; background: rgba(40, 60, 44, 0.8); }
 .attack { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .attack input[type=range] { width: 100%; accent-color: var(--accent); }
+
+.event-log { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.event-log li { padding: 2px 0; }
+.event-log li.bad button.link { color: #ff8a8a; }
+button.link { background: none; border: none; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; }
+.badge { background: #d33; color: #fff; border-radius: 8px; padding: 0 6px; font-size: 11px; vertical-align: middle; }

@@ -965,3 +965,25 @@ export function drawBuildingArt(g: Graphics, art: Art): void {
   if (art.progress < 1) site(c, art, finished);
   else finished(c);
 }
+
+// ---- military badge --------------------------------------------------------
+
+/**
+ * A shield with crossed swords floating at (x, y), the way to tell a garrison building from a workshop at a glance.
+ * The shield takes the owner's colour; an empty garrison (which defends nothing) is drawn grey. `k` scales it, so
+ * it can stay readable when the map is zoomed out.
+ */
+export function drawMilitaryBadge(g: Graphics, x: number, y: number, color: number, active: boolean, k = 1): void {
+  const shield = active ? color : 0x77797d;
+  const pt = (px: number, py: number): number[] => [x + px * k, y + py * k];
+  g.poly([...pt(-7, -8), ...pt(7, -8), ...pt(7, 1), ...pt(0, 9), ...pt(-7, 1)]).fill({ color: shield }).stroke({ width: 1.4 * k, color: 0x1a1a1a, alpha: 0.9 });
+  const blade = active ? 0xf4f4f0 : 0xc8c8c8;
+  for (const sx of [-1, 1]) {
+    const [x0, y0] = pt(-4.4 * sx, -5);
+    const [x1, y1] = pt(4.4 * sx, 3.6);
+    g.moveTo(x0!, y0!).lineTo(x1!, y1!).stroke({ width: 1.7 * k, color: blade });
+    const [hx, hy] = pt(-2.4 * sx, -2.6); // the guard, across the blade
+    const [gx, gy] = pt(-3.9 * sx, -1.3);
+    g.moveTo(hx!, hy!).lineTo(gx!, gy!).stroke({ width: 1.3 * k, color: 0x3a2c1c });
+  }
+}

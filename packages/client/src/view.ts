@@ -27,6 +27,8 @@ import {
   SEA_LEVEL,
   Terrain,
   buildingSize,
+  garrisonCapacityOf,
+  isActiveMilitary,
   checkBuilding,
   isStore,
   oreKindOf,
@@ -43,7 +45,7 @@ import { LAND, seaColor, clamp, dirtColor, fbm2, forestFloorColor, grassColor, h
 import { GROUNDS, paintGround, type Ground } from './textures.ts';
 import { clipBand, contourSegment, distanceField, polyArea, wavyOutline, type Vert } from './coast.ts';
 import { blob, outline, roadMesh, smoothPath, type RoadMesh } from './roads.ts';
-import { drawBuildingArt } from './buildings.ts';
+import { drawBuildingArt, drawMilitaryBadge } from './buildings.ts';
 import { drawPerson, tradeOf, type Trade } from './people.ts';
 import { ROW_H, S, flatY, gridBounds, pickHex, posToWorld, toWorld, type Pt } from './projection.ts';
 
@@ -173,6 +175,14 @@ export class View {
     const c = this.buildingCentre(game, game.buildings[game.castle]!);
     this.world.scale.set(scale);
     this.world.position.set(this.pixi.screen.width / 2 - c.x * scale, this.pixi.screen.height / 2 - c.y * scale);
+  }
+
+  /** Centre the camera on a map point, keeping the zoom (but not zoomed out further than the whole-map view). */
+  focusOn(pos: number): void {
+    const w = posToWorld(this.app.game, pos);
+    const scale = Math.max(this.world.scale.x, 0.6);
+    this.world.scale.set(scale);
+    this.world.position.set(this.pixi.screen.width / 2 - w.x * scale, this.pixi.screen.height / 2 - w.y * scale);
   }
 
   /** Where a map point is on the page (CSS px), for tools and tests. */
@@ -1408,6 +1418,11 @@ export class View {
       seed: b.index,
       ore: oreKindOf(b.type),
     });
+    if (!b.constructing && garrisonCapacityOf(b.type) >= 0) {
+      // bigger when zoomed out, so a garrison building still reads from far away
+      const k = clamp(0.75 / this.world.scale.x, 1, 2.2);
+      drawMilitaryBadge(g, c.x, c.y - h * 1.55 - 12 * k, TERRITORY_COLORS[b.owner % TERRITORY_COLORS.length]!, isActiveMilitary(b), k);
+    }
     if (b.constructing) {
       const bw = w * 0.9;
       g.rect(c.x - bw / 2, c.y + w / 4 + 8, bw, 5).fill({ color: 0x000000, alpha: 0.55 });

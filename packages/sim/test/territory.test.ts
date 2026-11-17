@@ -2,7 +2,7 @@
 // castle), and what happens to anything standing where the border moves away.
 // Ported from freeserf's update_land_ownership/surrender_land (see DESIGN.md).
 import { describe, expect, it } from 'vitest';
-import { BuildingType, Dir, Game, Res, UNCLAIMED } from '../src/index.ts';
+import { BuildingType, Dir, Game, Res, UNCLAIMED, planRoad } from '../src/index.ts';
 
 const T = BuildingType;
 
@@ -189,5 +189,21 @@ describe('save and load', () => {
     expect(h.flags.every((f) => f.owner === 0)).toBe(true);
     expect(h.buildings.every((b) => b.owner === 0)).toBe(true);
     expect(h.ownerAt[h.index(20, 10)]).toBe(0); // territory still comes back, recomputed fresh
+  });
+});
+
+describe('roads over land', () => {
+  it("are refused on someone else's land, by addRoad and by planRoad, and fine on unclaimed or your own", () => {
+    const g = new Game(60, 20);
+    g.placeBuilding(T.Castle, g.index(30, 10), false, 1); // owner 1 holds x 22..38
+    const a = g.addFlag(14, 10, 0);
+    const near = g.addFlag(18, 10, 0);
+    g.addRoad(a, [Dir.Right, Dir.Right, Dir.Right, Dir.Right]); // unclaimed ground: fine
+    expect(g.roads.length).toBe(1);
+    const mine = g.addFlag(21, 10, 0); // the last unclaimed point on this row
+    const theirs = g.addFlag(25, 10, 1);
+    expect(() => g.addRoad(mine, [Dir.Right, Dir.Right, Dir.Right, Dir.Right])).toThrow(/belongs to someone else/);
+    expect(planRoad(g, mine, g.flags[theirs]!.pos)).toBeNull();
+    expect(planRoad(g, near, g.flags[mine]!.pos)).not.toBeNull(); // short of the border it is fine
   });
 });

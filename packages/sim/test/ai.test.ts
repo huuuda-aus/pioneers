@@ -125,6 +125,21 @@ describe('temperament', { timeout: 30000 }, () => {
     expect(hut).toBeGreaterThanOrEqual(0);
   });
 
+  it('does not attack a garrison it would lose to, but does once gold in its stores makes its knights worth more', () => {
+    const struck = (gold: number): boolean => {
+      const { g, hut, east } = withTarget(Temperament.Aggressive, 2);
+      g.buildings[hut]!.veterans = [0, 0, 2, 0]; // two rank-3 knights: 2 x 8 x home morale
+      g.addStock(east, Res.Gold, gold);
+      for (let i = 0; i < 70000; i++) {
+        g.update();
+        if (g.attackers.some((a) => a.owner === 1)) return true;
+      }
+      return false;
+    };
+    expect(struck(0)).toBe(false); // away from home it is no match, and it waits for more instead of throwing knights away
+    expect(struck(40)).toBe(true); // all the gold on its side: away morale about five times a home knight's
+  });
+
   it('defensive leaves a neighbour alone until it is attacked, then hits back', () => {
     const { g, hut, ai } = withTarget(Temperament.Defensive, 1);
     for (let i = 0; i < 60000; i++) g.update();

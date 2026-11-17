@@ -4,7 +4,7 @@
 // own (a countdown, a temperament, when it was last attacked): every decision
 // is a function of the game and `hash01`, so a saved game replays exactly.
 
-import { BState, BuildingType, Res, garrisonCapacityOf, toolFor, type AiPlayer, type Building, Temperament, TOOL_KINDS } from './types.ts';
+import { BState, BuildingType, Res, garrisonCapacityOf, toolFor, type AiPlayer, type Building, Temperament, TOOL_KINDS, acceptsAll } from './types.ts';
 import { hexDistance } from './terrain.ts';
 import { checkBuilding, checkFlag } from './placement.ts';
 import { planRoad } from './plan.ts';
@@ -16,11 +16,13 @@ interface Knobs {
   period: number;
   cap: number;
   attack: 'never' | 'provoked' | 'always';
+  /** It attacks only when its force is worth at least this many times the defenders: a margin for luck. */
+  odds: number;
 }
 export const KNOBS: Record<Temperament, Knobs> = {
-  [Temperament.Peaceful]: { period: 450, cap: 4, attack: 'never' },
-  [Temperament.Defensive]: { period: 300, cap: 8, attack: 'provoked' },
-  [Temperament.Aggressive]: { period: 200, cap: 14, attack: 'always' },
+  [Temperament.Peaceful]: { period: 450, cap: 4, attack: 'never', odds: 99 },
+  [Temperament.Defensive]: { period: 300, cap: 8, attack: 'provoked', odds: 1 },
+  [Temperament.Aggressive]: { period: 200, cap: 24, attack: 'always', odds: 1.3 },
 };
 /** A defensive AI hits back for this long after being attacked. */
 const PROVOKED_TICKS = 20000;
@@ -28,13 +30,18 @@ const PROVOKED_TICKS = 20000;
 const SEEK_EXTRA = 6;
 /** Sites it will leave unfinished at once before waiting for builders. */
 const MAX_SITES = 2;
+/** Swords in the castle before it builds a fortress (twelve knights) rather than a tower. */
+const FORTRESS_SWORDS = 14;
+/** One or two staging fortresses; the rest of the advance is cheap huts, which stone can pay for. */
+const MAX_FORTRESSES = 2;
+const MAX_TOWERS = 3;
 /** Carriers the castle keeps back from expansion: every road needs one, and a mine's road left without is a mine never built. */
 const CARRIER_RESERVE = 12;
 /** Below this many spare carriers it merges roads to free some. */
 const CARRIER_LOW = 8;
 /** It puts up a storage (20 more carriers) when the castle has fewer than this many left, up to MAX_STORAGES. */
 const STORAGE_BELOW = 14;
-const MAX_STORAGES = 2;
+const MAX_STORAGES = 3;
 /** Two roads are merged only if together they stay this short: a very long road is a bottleneck for everything behind it. */
 const MERGE_MAX = 10;
 /** Spots it will try for one building before giving up for the step. */
@@ -57,6 +64,7 @@ const GLUT: Partial<Record<BuildingType, [Res, number]>> = {
   [BuildingType.Lumberjack]: [Res.Lumber, 100],
   [BuildingType.Sawmill]: [Res.Plank, 100],
   [BuildingType.Stonecutter]: [Res.Stone, 100],
+  [BuildingType.StoneMine]: [Res.Stone, 100],
   [BuildingType.Fisher]: [Res.Fish, 100],
   [BuildingType.Well]: [Res.Water, 60],
   [BuildingType.Farm]: [Res.Wheat, 60],
@@ -75,6 +83,23 @@ const TOOLS_ENOUGH = 3;
 const TOOLS_WANTED = 2;
 const toolsStocked = (stock: ArrayLike<number>, n: number): boolean => TOOL_KINDS.every((r) => stock[r]! >= n);
 
+/**
+ * The glut limit for a producer. A fighting AI hoards gold: away from home its knights are worth 1024 plus its
+ * share of all the gold in the world (up to ~5x their home strength), and gold in any of its stores counts.
+ */
+function glutFor(ai: AiPlayer, t: BuildingType): [Res, number] | undefined {
+  const glut = GLUT[t];
+  if (!glut || ai.temperament === Temperament.Peaceful) return glut;
+  if (t === BuildingType.GoldSmelter) return [Res.Gold, GOLD_HOARD];
+  if (t === BuildingType.GoldMine) return [Res.GoldOre, GOLD_HOARD];
+  return glut;
+}
+const GOLD_HOARD = 60;
+
+/** Carriers it can still send out, from its castle and every storage: roads hire from the nearest that has one. */
+const spareCarriers = (g: Game, owner: number): number =>
+  g.buildings.reduce((n, b) => (!b.removed && b.owner === owner && b.burning === 0 && acceptsAll(b) ? n + b.carriers : n), 0);
+
 const isMilitaryType = (t: BuildingType): boolean => t !== BuildingType.Castle && garrisonCapacityOf(t) >= 0;
 
 export const aiPeriod = (ai: AiPlayer): number => KNOBS[ai.temperament].period;
@@ -85,8 +110,10 @@ function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number, worki
   const out: BuildingType[] = [];
   const stock = g.buildings[g.castleOf(ai.owner)]!.stock;
   for (const [type, want] of ECONOMY) for (let i = count(type); i < want; i++) out.push(type);
+  // no rocks left to cut and the building stone gone: dig it out of a mountain instead
+  if (stock[Res.Stone]! < 8 && working(T.Stonecutter) === 0 && count(T.StoneMine) === 0) out.push(T.StoneMine);
   // a storage brings 20 more carriers: put up another before the castle's 40 run out, as a growing colony must
-  if (g.buildings[g.castleOf(ai.owner)]!.carriers < STORAGE_BELOW && count(T.Storage) < MAX_STORAGES) out.push(T.Storage);
+  if (spareCarriers(g, ai.owner) < STORAGE_BELOW && count(T.Storage) < MAX_STORAGES) out.push(T.Storage);
   // food the mines will eat: fish if there is water to be had, else the bread chain
   // (the bread chain is kept whole: a baker with no well beside it feeds nobody)
   if (count(T.Fisher) === 0) {
@@ -112,7 +139,7 @@ function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number, worki
   for (const t of chain) if ((oreKindOf(t) !== OreKind.None ? working(t) : count(t)) === 0) out.push(t);
   // nothing that would add to a pile it already has
   return out.filter((t) => {
-    const glut = GLUT[t];
+    const glut = glutFor(ai, t);
     return !glut || stock[glut[0]]! < glut[1] / 2;
   });
 }
@@ -129,7 +156,7 @@ export function aiStep(g: Game, ai: AiPlayer): void {
   // a producer whose goods are piling up in the castle is pulled down before they clog the roads
   const castleStock = g.buildings[castle]!.stock;
   for (const b of own) {
-    const glut = GLUT[b.type];
+    const glut = glutFor(ai, b.type);
     if (glut && !b.constructing && castleStock[glut[0]]! >= glut[1]) {
       g.demolishBuilding(b.index);
       return;
@@ -143,8 +170,8 @@ export function aiStep(g: Game, ai: AiPlayer): void {
     return;
   }
 
-  // a mine that has dug out its ore is pulled down: it hands its pick back, and the next one goes where ore is left
-  const spent = own.find((b) => !b.constructing && oreKindOf(b.type) !== OreKind.None && b.state === BState.NoResource);
+  // a mine that has dug out its ore (or a stonecutter that has cleared its rocks) is pulled down: it hands its pick back, and the next one goes where ore is left
+  const spent = own.find((b) => !b.constructing && (oreKindOf(b.type) !== OreKind.None || b.type === BuildingType.Stonecutter) && b.state === BState.NoResource);
   if (spent) {
     g.demolishBuilding(spent.index);
     return;
@@ -166,7 +193,7 @@ export function aiStep(g: Game, ai: AiPlayer): void {
   }
 
   // carriers running short: a bare waypoint flag is taken out, so its two roads become one and need one carrier, not two
-  if (g.buildings[castle]!.carriers < CARRIER_LOW) {
+  if (spareCarriers(g, ai.owner) < CARRIER_LOW) {
     const waypoint = g.flags.find((f) => !f.removed && f.owner === ai.owner && g.checkDemolishFlag(f.index).ok && f.road.reduce((n, ri) => n + (ri >= 0 ? g.roads[ri]!.length : 0), 0) <= MERGE_MAX);
     if (waypoint) {
       g.demolishFlag(waypoint.index);
@@ -213,11 +240,14 @@ export function aiStep(g: Game, ai: AiPlayer): void {
     }
     const military = own.filter((b) => isMilitaryType(b.type));
     const building = military.filter((b) => b.constructing).length;
-    if (building === 0 && g.buildings[castle]!.carriers >= CARRIER_RESERVE && military.length < KNOBS[ai.temperament].cap + (seek >= 0 ? SEEK_EXTRA : 0)) {
+    if (building === 0 && spareCarriers(g, ai.owner) >= CARRIER_RESERVE && military.length < KNOBS[ai.temperament].cap + (seek >= 0 ? SEEK_EXTRA : 0)) {
       // towers soak up six swords each: not while it is short of them on the way to ore
-      const tower = seek < 0 && military.length >= 3 && affordable(g, ai.owner, castle, BuildingType.Tower);
-      const type = tower ? BuildingType.Tower : BuildingType.Hut;
       const stock = g.buildings[castle]!.stock;
+      const forward = seek < 0 && military.length >= 3;
+      // a fortress holds twelve knights: worth it once it has the swords to fill one, and means to use them
+      const fortress = forward && ai.temperament !== Temperament.Peaceful && stock[Res.Sword]! >= FORTRESS_SWORDS && count(BuildingType.Fortress) < MAX_FORTRESSES && affordable(g, ai.owner, castle, BuildingType.Fortress);
+      const tower = forward && count(BuildingType.Tower) < MAX_TOWERS && affordable(g, ai.owner, castle, BuildingType.Tower);
+      const type = fortress ? BuildingType.Fortress : tower ? BuildingType.Tower : BuildingType.Hut;
       if (stock[Res.Sword]! > 0 && stock[Res.Shield]! > 0 && affordable(g, ai.owner, castle, type) && build(g, ai, type, seek)) return;
     }
   }
@@ -396,17 +426,28 @@ function connect(g: Game, owner: number, flag: number): boolean {
 // ---- fighting ---------------------------------------------------------
 
 function attack(g: Game, ai: AiPlayer): void {
-  const mode = KNOBS[ai.temperament].attack;
-  if (mode === 'never') return;
-  if (mode === 'provoked' && (ai.provoked < 0 || ((g.tick - ai.provoked) & 0xffff) > PROVOKED_TICKS)) return;
-  let best: Building | null = null;
+  const knobs = KNOBS[ai.temperament];
+  if (knobs.attack === 'never') return;
+  if (knobs.attack === 'provoked' && (ai.provoked < 0 || ((g.tick - ai.provoked) & 0xffff) > PROVOKED_TICKS)) return;
+  const own = g.buildings[g.castleOf(ai.owner)]!.pos;
+  let best: { target: Building; send: number; castle: boolean; ratio: number; d: number } | null = null;
   for (const t of g.buildings) {
     if (t.removed || t.owner === ai.owner || garrisonCapacityOf(t.type) < 0) continue;
-    if (!g.checkAttack(ai.owner, t.index).ok) continue;
-    if (!best || t.garrison < best.garrison) best = t;
+    const force = g.attackForce(ai.owner, t.index);
+    if (force.length === 0) continue;
+    // how many of the knights it could send are enough to be worth `odds` times the defenders (it sends one more for luck)
+    const defence = g.defencePower(t.index);
+    let send = 1;
+    while (send < force.length && g.attackPower(ai.owner, force.slice(0, send)) < knobs.odds * defence) send++;
+    if (g.attackPower(ai.owner, force.slice(0, send)) < knobs.odds * defence) continue; // would lose: waits for more
+    send = Math.min(force.length, send + 1);
+    const ratio = defence === 0 ? Infinity : g.attackPower(ai.owner, force.slice(0, send)) / defence;
+    const cand = { target: t, send, castle: t.type === BuildingType.Castle, ratio, d: dist(g, t.pos, own) };
+    // a castle it can take ends the game; otherwise the best odds, then the nearest
+    const better =
+      !best ||
+      (cand.castle !== best.castle ? cand.castle : cand.ratio !== best.ratio ? cand.ratio > best.ratio : cand.d < best.d);
+    if (better) best = cand;
   }
-  if (!best) return;
-  const avail = g.availableKnights(ai.owner, best.index);
-  if (avail < best.garrison + 1) return;
-  g.sendAttack(ai.owner, best.index, best.garrison + 2);
+  if (best) g.sendAttack(ai.owner, best.target.index, best.send);
 }

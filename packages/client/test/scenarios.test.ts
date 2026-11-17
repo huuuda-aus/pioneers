@@ -268,3 +268,24 @@ describe('the rival in the territory scenario', { timeout: 120000 }, () => {
     expect(g.created[Res.Sword]!).toBeGreaterThan(120);
   });
 });
+
+describe('the event log', () => {
+  it('records an attack and a capture from the player\'s side, newest first, and clears on a new game', () => {
+    const app = new App();
+    app.loadScenario('territory');
+    const g = app.game;
+    const hut = g.buildings.find((b) => !b.removed && b.owner === 1 && b.type === BuildingType.Hut && b.garrison > 0)!;
+    g.sendAttack(0, hut.index, 2);
+    app.frame(20);
+    expect(app.log[0]!.text).toBe('You attacked an enemy hut');
+    expect(app.unreadLog).toBe(1);
+    g.alerts.push({ kind: 'lost', owner: 0, building: hut.index }, { kind: 'captured', owner: 1, building: hut.index });
+    app.frame(20);
+    expect(app.log[0]!.text).toBe('You lost a hut'); // the enemy's own 'captured' is not logged twice
+    expect(app.log.length).toBe(2);
+    app.readLog();
+    expect(app.unreadLog).toBe(0);
+    app.loadScenario('new');
+    expect(app.log).toEqual([]);
+  });
+});

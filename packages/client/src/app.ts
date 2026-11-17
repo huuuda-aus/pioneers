@@ -2,7 +2,7 @@
 // and selection, and every command that changes the sim. The renderer and the
 // panels only read from here.
 
-import { BuildingType, Game, Temperament, MapObject, ORE_NAMES, SIGN_EMPTY, buildNeeds, type OreKind, Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
+import { type Alert, BuildingType, Game, Temperament, MapObject, ORE_NAMES, SIGN_EMPTY, buildNeeds, type OreKind, Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
 import { BUILDING_NAME } from './palette.ts';
 import { type KV, exportSave, importSave, readSave, writeSave } from './persistence.ts';
 import { makeScenario, type ScenarioId } from './scenarios.ts';
@@ -75,6 +75,18 @@ export interface BuildOption {
   planks: number;
   stones: number;
 }
+
+/** One line of the event log. */
+export interface LogEntry {
+  tick: number;
+  kind: Alert['kind'];
+  text: string;
+  /** Map point of the building it was about, to look at. */
+  pos: number;
+  /** Whether it happened to the player's side. */
+  mine: boolean;
+}
+const LOG_MAX = 100;
 
 export type Selection = { kind: 'flag' | 'building' | 'road'; index: number } | null;
 
@@ -250,6 +262,8 @@ export class App {
       return false;
     }
     this.game = result.game;
+    this.log = [];
+    this.unreadLog = 0;
     this.resultSeen = false;
     this.resultDismissed = false;
     this.game.settlers = true; // games saved before workers walked in get it too
@@ -312,12 +326,9 @@ export class App {
       this.changed();
     }
     if (g.alerts.length > 0) {
-      const mine = g.alerts.splice(0).filter((a) => a.owner === 0);
-      const last = mine[mine.length - 1];
-      if (last) {
-        const name = BUILDING_NAME[g.buildings[last.building]!.type]!.toLowerCase();
-        this.say(last.kind === 'attacked' ? `Your ${name} is under attack!` : last.kind === 'captured' ? `You captured an enemy ${name}!` : `You lost a ${name}!`);
-      }
+      const added = this.record(g.alerts.splice(0));
+      const last = added[0];
+      if (last) this.say(last.text + (last.kind === 'attacked' || last.kind === 'lost' ? '!' : '.'));
     }
     this.sinceSave += dtMs;
     if (this.storage) {
@@ -507,12 +518,47 @@ export class App {
     this.changed();
   }
 
+  /** What has happened between the two sides, newest first (not saved with the game). */
+  log: LogEntry[] = [];
+  /** Entries added since the player last looked at the log. */
+  unreadLog = 0;
+
+  /** Turn the game's alerts into log entries from the player's side; returns the new ones, newest first. */
+  private record(alerts: Alert[]): LogEntry[] {
+    const g = this.game;
+    const added: LogEntry[] = [];
+    for (const a of alerts) {
+      const b = g.buildings[a.building];
+      if (!b) continue;
+      const name = BUILDING_NAME[b.type]!.toLowerCase();
+      const mine = a.owner === 0;
+      let text: string | null = null;
+      if (a.kind === 'attacked') text = mine ? `Your ${name} is under attack` : `You attacked an enemy ${name}`;
+      else if (a.kind === 'captured') text = mine ? `You captured an enemy ${name}` : null; // the enemy's capture is the player's 'lost'
+      else if (a.kind === 'lost') text = mine ? `You lost a ${name}` : null;
+      else if (a.kind === 'defeated') text = mine ? 'Your castle has fallen' : "The enemy's castle has fallen";
+      if (text !== null) added.unshift({ tick: g.tick, kind: a.kind, text, pos: b.pos >= 0 ? b.pos : g.flags[b.flag]!.pos, mine });
+    }
+    if (added.length > 0) {
+      this.log = [...added, ...this.log].slice(0, LOG_MAX);
+      this.unreadLog += added.length;
+    }
+    return added;
+  }
+
+  /** The player has seen the log. */
+  readLog(): void {
+    this.unreadLog = 0;
+  }
+
   togglePause(): void {
     this.setSpeed(this.game.speed === 0 ? this.lastSpeed : 0);
   }
 
   loadScenario(id: ScenarioId): void {
     this.game = makeScenario(id);
+    this.log = [];
+    this.unreadLog = 0;
     this.resultSeen = false;
     this.resultDismissed = false;
     this.selection = null;

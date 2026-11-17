@@ -284,7 +284,7 @@ them. (There is only ever one castle, and it can't be built.)
   Ownership is never saved: it is purely a function of the current military
   buildings, so a restore recomputes it from scratch, same as the lookup
   tables for what stands on each point. One castle per owner (`placeBuilding`'s
-  `owner` argument, 0 by default). A flag or building can only go on land
+  `owner` argument, 0 by default). A flag, a building or a road step can only go on land
   that is yours or nobody's (`checkFlag`/`checkBuilding`, ported from
   freeserf's `can_build_flag`/`can_player_build`) — refused up front with a
   reason, same as every other placement rule. Simpler than the original,
@@ -390,7 +390,15 @@ them. (There is only ever one castle, and it can't be built.)
   together (a 179-tile road choked everything behind it); pulls down its toolmaker
   once every tool is stocked three deep (left alone it turned 400 of 507 iron into
   tools) and glut-checks smelters, weaponsmith and gold. The territory scenario's
-  ore hill is radius 4 with 60 ore a point, since the old one ran dry. **Not yet**: more
+  ore hill is radius 4 with 60 ore a point, since the old one ran dry.
+  **War**: it sizes a fight before starting one. A target's defence is the sum of its knights' duel strengths at home
+  (2^rank x 4096) and its force is the knights `attackForce` would send (nearest garrison first, strongest first) at
+  its away morale, which is 1024 plus its share of all gold in the world, so gold in any of its stores is worth up to
+  five home knights. It attacks only when the force is at least `odds` (aggressive 1.3, defensive 1.0 once provoked)
+  times the defence, sends just enough plus one, prefers a castle it can beat, then the best odds, then the
+  nearest. Fighting temperaments hoard gold (smelter and mine glut 60), build up to two fortresses and three towers
+  once they hold 14 swords, creep forward in huts (aggressive cap 24), and dig stone when the rocks run out. In the
+  territory scenario an aggressive rival takes the player's castle in about 370k ticks if left alone. **Not yet**: more
   than one of anything, demolition, repairs, a second storage, and expanding
   cleverly (the territory scenario guarantees a mountain of coal, iron
   and gold (radius 3, 40 ore a point) 13 steps from each castle, just beyond its reach, so one hut is

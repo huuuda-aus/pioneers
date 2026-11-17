@@ -329,3 +329,15 @@ describe('save and load', () => {
     expect(UNCLAIMED).toBe(255);
   });
 });
+
+describe('sizing up a fight', () => {
+  it('attackForce lists the knights that would march, strongest first, and what they are worth', () => {
+    const { g, a, b } = duel(4, 2);
+    g.buildings[a]!.veterans = [0, 1, 0, 1]; // one rank 2, one rank 4, two rank 0
+    expect(g.attackForce(0, b)).toEqual([4, 2, 0]); // one stays home
+    expect(g.attackForce(0, a)).toEqual([]); // not an enemy
+    expect(g.attackPower(0, [4, 2, 0])).toBe((16 + 4 + 1) * 4096); // no gold anywhere: home morale
+    g.buildings[b]!.veterans = [0, 0, 1, 0];
+    expect(g.defencePower(b)).toBe((1 + 8) * 4096);
+  });
+});

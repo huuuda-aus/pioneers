@@ -38,7 +38,7 @@ export function planRoad(game: Game, fromFlag: number, toPos: number): Dir[] | n
       if (pos === from.pos && from.road[d]! >= 0) continue; // first step
       const next = game.move(pos, d as Dir);
       if (next < 0 || prev[next] !== -2) continue;
-      if (!checkRoadStep(game, pos, next).ok) continue;
+      if (!checkRoadStep(game, pos, next, from.owner).ok) continue;
       if (next === toPos) {
         if (to.road[reverse(d as Dir)]! >= 0) continue; // last step
         const dirs: Dir[] = [d as Dir];

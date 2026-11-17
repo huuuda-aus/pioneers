@@ -4,7 +4,7 @@
 // moves.
 import { describe, expect, it } from 'vitest';
 import { BuildingType } from '@sett/sim';
-import { drawBuildingArt, type Art } from '../src/buildings.ts';
+import { drawBuildingArt, drawMilitaryBadge, type Art } from '../src/buildings.ts';
 
 interface Call {
   name: string;
@@ -178,5 +178,25 @@ describe('looks', () => {
     const a = JSON.stringify(draw(art(T.StoneMine, { seed: 1 })));
     const b = JSON.stringify(draw(art(T.StoneMine, { seed: 9 })));
     expect(a).not.toBe(b);
+  });
+});
+
+describe('the military badge', () => {
+  const badge = (color: number, active: boolean, k = 1) => {
+    const r = recorder();
+    drawMilitaryBadge(r.g, 100, 100, color, active, k);
+    return r.calls;
+  };
+  it('is a shield and two crossed swords, in the owner colour when manned and grey when empty', () => {
+    const calls = badge(0x3fa6ff, true);
+    expect(calls.filter((c) => c.name === 'poly').length).toBe(1);
+    expect(calls.filter((c) => c.name === 'lineTo').length).toBe(4); // two blades, two guards
+    expect(JSON.stringify(calls)).toContain(String(0x3fa6ff));
+    expect(JSON.stringify(badge(0x3fa6ff, false))).not.toContain(String(0x3fa6ff));
+  });
+  it('scales about its centre', () => {
+    const small = extent(badge(0xff5d5d, true, 1));
+    const big = extent(badge(0xff5d5d, true, 2));
+    expect(big.maxX - big.minX).toBeCloseTo((small.maxX - small.minX) * 2, 5);
   });
 });

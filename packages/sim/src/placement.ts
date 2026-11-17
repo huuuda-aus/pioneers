@@ -121,7 +121,8 @@ function ownable(game: Game, pos: number, owner: number): boolean {
 }
 
 /** One road step from `from` to the adjacent point `to`. */
-export function checkRoadStep(game: Game, from: number, to: number): Check {
+export function checkRoadStep(game: Game, from: number, to: number, owner = 0): Check {
+  if (!ownable(game, to, owner)) return no('that land belongs to someone else');
   const t = game.terrain;
   if (t.kindAt(from) === Terrain.Water || t.kindAt(to) === Terrain.Water) {
     return no('roads cannot cross water');

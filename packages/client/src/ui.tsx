@@ -300,6 +300,7 @@ export function Root({ app }: { app: App }) {
           <FoodSliders app={app} />
           <ToolSliders app={app} />
           <Opponent app={app} />
+          <EventLog app={app} viewRef={viewRef} />
           <Inspector app={app} />
         </div>
       </div>
@@ -488,6 +489,32 @@ function Opponent({ app }: { app: App }) {
         ))}
       </select>
       <p class="hint">Peaceful never attacks. Defensive hits back. Aggressive goes for weak garrisons.</p>
+    </section>
+  );
+}
+
+function EventLog({ app, viewRef }: { app: App; viewRef: { current: View | null } }) {
+  if (app.log.length === 0) return null;
+  const now = app.game.tick;
+  const age = (tick: number): string => {
+    const s = ((now - tick) & 0xffff) / 50; // game ticks run at 50 a second (the clock wraps after ~21 minutes)
+    return s < 90 ? `${Math.round(s)}s` : `${Math.round(s / 60)}m`;
+  };
+  return (
+    <section onMouseEnter={() => app.readLog()}>
+      <h2>
+        Events{app.unreadLog > 0 && <span class="badge"> {app.unreadLog} new</span>}
+      </h2>
+      <ul class="event-log">
+        {app.log.slice(0, 12).map((e, i) => (
+          <li key={`${e.tick}:${i}:${e.text}`} class={e.kind === 'lost' || e.kind === 'attacked' ? (e.mine ? 'bad' : '') : ''}>
+            <button class="link" onClick={() => viewRef.current?.focusOn(e.pos)}>
+              {e.text}
+            </button>
+            <span class="hint"> {age(e.tick)} ago</span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
