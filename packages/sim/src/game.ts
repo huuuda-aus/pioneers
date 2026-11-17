@@ -6,6 +6,7 @@
 import {
   type AiPlayer,
   Temperament,
+  Difficulty,
   ATTACK_RANGE,
   HOME_MORALE,
   RANK_MAX,
@@ -1156,6 +1157,7 @@ export class Game {
       ai.cooldown -= this.speed;
       if (ai.cooldown <= 0) {
         ai.cooldown = aiPeriod(ai);
+        ai.age = (ai.age ?? 0) + ai.cooldown;
         aiStep(this, ai);
       }
     }
@@ -1805,8 +1807,9 @@ export class Game {
   }
 
   /** A computer opponent plays `owner` from now on. */
-  addAi(owner: number, temperament: Temperament = Temperament.Defensive): AiPlayer {
-    const ai: AiPlayer = { owner, temperament, cooldown: aiPeriod({ owner, temperament, cooldown: 0, provoked: -1 }), provoked: -1 };
+  addAi(owner: number, temperament: Temperament = Temperament.Defensive, difficulty: Difficulty = Difficulty.Normal): AiPlayer {
+    const ai: AiPlayer = { owner, temperament, cooldown: 0, provoked: -1, difficulty, age: 0 };
+    ai.cooldown = aiPeriod(ai);
     this.ais.push(ai);
     return ai;
   }
@@ -2173,6 +2176,7 @@ export class Game {
     g.knights = d.knights ?? [];
     g.nextKnight = d.nextKnight ?? g.knights.length;
     g.ais = d.ais ?? [];
+    for (const ai of g.ais) ai.difficulty ??= Difficulty.Normal; // `age` stays unset in an old save: it has no opening grace
     g.defeated = d.defeated ?? [];
     g.attackers = (d.attackers ?? []).map((a) => ({ ...a, rank: a.rank ?? 0, defRank: a.defRank ?? -1 }));
     g.nextAttacker = d.nextAttacker ?? g.attackers.length;

@@ -86,6 +86,8 @@ export class MapObjects {
   readonly sign: Uint8Array;
   readonly signLeft: Uint16Array;
   private signed: number[] = [];
+  /** Bumped whenever an object appears, disappears or changes kind (never saved): lets a view redraw its forests only then. */
+  version = 0;
 
   constructor(cols: number, rows: number) {
     this.cols = cols;
@@ -159,6 +161,7 @@ export class MapObjects {
       if (left <= 0) {
         this.growth[p] = 0;
         this.kind[p] = k === MapObject.Sapling ? MapObject.Tree : MapObject.Wheat;
+        this.version++;
       } else {
         this.growth[p] = left;
         still.push(p);
@@ -176,6 +179,7 @@ export class MapObjects {
   }
 
   set(pos: number, kind: MapObject, amount = 1): void {
+    this.version++;
     this.kind[pos] = kind;
     this.amount[pos] = kind === MapObject.None ? 0 : amount;
     this.reservedBy[pos] = 0;

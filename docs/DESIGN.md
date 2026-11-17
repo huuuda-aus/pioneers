@@ -406,7 +406,14 @@ them. (There is only ever one castle, and it can't be built.)
   times the defence, sends just enough plus one, prefers a castle it can beat, then the best odds, then the
   nearest. Fighting temperaments hoard gold (smelter and mine glut 60), build up to two fortresses and three towers
   once they hold 14 swords, creep forward in huts (aggressive cap 24), and dig stone when the rocks run out. In the
-  territory scenario an aggressive rival takes the player's castle in about 370k ticks if left alone. **Not yet**: more
+  territory scenario an aggressive rival takes the player's castle in about 370k-750k ticks if left alone (it varies
+  with the opening). **Difficulty** (`Difficulty`, table `SKILL` in `ai.ts`, a select in the Opponent panel): Easy plays at
+  1.5x its decision period, wants odds 0.6 better, waits 150k ticks of its own time (`AiPlayer.age`, which unlike
+  `Game.tick` never wraps) before its first unprovoked attack, hoards 30 gold and wants 0.7x the military buildings;
+  Normal is the temperament's own numbers with a 60k grace; Hard is 0.6x period, odds 0.3 lower (never below even), 20k
+  grace, 90 gold, 1.5x military. Retaliation by a provoked Defensive AI ignores the grace. An old save loads Normal with
+  no grace. At Normal the first attack in the territory scenario comes around 88k ticks, Easy's at 150k and it
+  has not taken the castle by 700k. **Not yet**: more
   than one of anything, demolition, repairs, a second storage, and expanding
   cleverly (the territory scenario guarantees a mountain of coal, iron
   and gold (radius 3, 40 ore a point) 13 steps from each castle, just beyond its reach, so one hut is
@@ -430,3 +437,20 @@ builders and ordinary carriers never go home otherwise, and carrier caps, build 
 are placeholders. Terrain is drawn once as a triangle mesh; everything else is
 vector shapes redrawn each frame, to be replaced by pooled sprites with real
 art.
+
+## Zoomed-out detail (client)
+
+Below `world.scale` 0.5 (hysteresis 0.05, `lod.ts`) the map is drawn the cheap way, because the whole of it is on
+screen and everything is a few pixels big. Trees and rocks become one shape or two each in a single static `gFar`
+layer, redrawn only when `MapObjects.version` changes (bumped on every `set`, not saved); buildings are three-polygon
+blocks (`drawBuildingFar`) with the military badge, flags lose the goods on them, carriers are dots (idle ones are
+skipped), workers and the labels are hidden, attacking knights stay as coloured dots; the water loses its per-point foam
+and glints (the water points are found once instead of scanning the map every frame); and the busy layers (water,
+scene) are redrawn every third frame. F3 shows a smoothed per-section draw time and the tier, for measuring. The full
+picture is unchanged above the threshold.
+
+## Game speed (client)
+
+The sim advances `game.speed` ticks per 20 ms step. The speed buttons are 1x/2x/4x/8x/16x = 1/2/4/8/16 ticks per step
+(`NORMAL_SPEED = 1`), so at 1x a carrier takes 1.6 s per flat tile. It used to be 2 ticks at "1x", which ran twice too fast;
+a game saved at an old speed keeps the number it was saved with. The sim itself, its tests and `Game.speed`'s default are unchanged.

@@ -75,7 +75,7 @@ describe('loading', () => {
     const b = new App('new', store);
     expect(b.game.speed).toBe(0);
     b.togglePause();
-    expect(b.game.speed).toBe(2);
+    expect(b.game.speed).toBe(1);
   });
 
   it('an unreadable save is set aside and a new game starts, with the reason shown', () => {

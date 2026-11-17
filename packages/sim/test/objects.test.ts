@@ -316,3 +316,26 @@ describe('resources are unlimited without objects', () => {
     expect(() => new Game(10, 10, TerrainMap.flat(8, 8), new MapObjects(10, 10))).toThrow('size');
   });
 });
+
+describe('the change counter a view redraws its forests by', () => {
+  it('moves when an object appears, goes, or a sapling grows up, and not when a sign fades', () => {
+    const o = new MapObjects(10, 10);
+    const v0 = o.version;
+    o.set(5, MapObject.Tree);
+    expect(o.version).toBeGreaterThan(v0);
+    const v1 = o.version;
+    o.remove(5);
+    expect(o.version).toBeGreaterThan(v1);
+    o.plant(7, 100);
+    const v2 = o.version;
+    o.grow(40);
+    expect(o.version).toBe(v2); // still a sapling
+    o.grow(60);
+    expect(o.kindAt(7)).toBe(MapObject.Tree);
+    expect(o.version).toBeGreaterThan(v2);
+    const v3 = o.version;
+    o.setSign(3, 1, 10);
+    o.fadeSigns(20);
+    expect(o.version).toBe(v3);
+  });
+});

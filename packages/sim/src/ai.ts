@@ -4,7 +4,7 @@
 // own (a countdown, a temperament, when it was last attacked): every decision
 // is a function of the game and `hash01`, so a saved game replays exactly.
 
-import { BState, BuildingType, Res, garrisonCapacityOf, toolFor, type AiPlayer, type Building, Temperament, TOOL_KINDS, acceptsAll } from './types.ts';
+import { BState, BuildingType, Difficulty, Res, garrisonCapacityOf, toolFor, type AiPlayer, type Building, Temperament, TOOL_KINDS, acceptsAll } from './types.ts';
 import { hexDistance } from './terrain.ts';
 import { checkBuilding, checkFlag } from './placement.ts';
 import { planRoad } from './plan.ts';
@@ -90,11 +90,11 @@ const toolsStocked = (stock: ArrayLike<number>, n: number): boolean => TOOL_KIND
 function glutFor(ai: AiPlayer, t: BuildingType): [Res, number] | undefined {
   const glut = GLUT[t];
   if (!glut || ai.temperament === Temperament.Peaceful) return glut;
-  if (t === BuildingType.GoldSmelter) return [Res.Gold, GOLD_HOARD];
-  if (t === BuildingType.GoldMine) return [Res.GoldOre, GOLD_HOARD];
+  const hoard = skillOf(ai).hoard;
+  if (t === BuildingType.GoldSmelter) return [Res.Gold, hoard];
+  if (t === BuildingType.GoldMine) return [Res.GoldOre, hoard];
   return glut;
 }
-const GOLD_HOARD = 60;
 
 /** Carriers it can still send out, from its castle and every storage: roads hire from the nearest that has one. */
 const spareCarriers = (g: Game, owner: number): number =>
@@ -102,7 +102,27 @@ const spareCarriers = (g: Game, owner: number): number =>
 
 const isMilitaryType = (t: BuildingType): boolean => t !== BuildingType.Castle && garrisonCapacityOf(t) >= 0;
 
-export const aiPeriod = (ai: AiPlayer): number => KNOBS[ai.temperament].period;
+/** How a difficulty bends the temperament's knobs. */
+interface Skill {
+  /** Multiplies the time between its decisions. */
+  period: number;
+  /** Added to the temperament's `odds` (it still never goes below 1). */
+  odds: number;
+  /** Ticks of its own time before its first unprovoked attack. */
+  grace: number;
+  /** Gold it hoards before pulling down its gold chain. */
+  hoard: number;
+  /** Multiplies how many military buildings it wants. */
+  cap: number;
+}
+export const SKILL: Record<Difficulty, Skill> = {
+  [Difficulty.Easy]: { period: 1.5, odds: 0.6, grace: 150000, hoard: 30, cap: 0.7 },
+  [Difficulty.Normal]: { period: 1, odds: 0, grace: 60000, hoard: 60, cap: 1 },
+  [Difficulty.Hard]: { period: 0.6, odds: -0.3, grace: 20000, hoard: 90, cap: 1.5 },
+};
+const skillOf = (ai: AiPlayer): Skill => SKILL[ai.difficulty ?? Difficulty.Normal];
+
+export const aiPeriod = (ai: AiPlayer): number => Math.round(KNOBS[ai.temperament].period * skillOf(ai).period);
 
 /** Everything it still wants to build before soldiers, in order: wood and stone, food, mines, then the metal and weapons chain. */
 function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number, working: (t: BuildingType) => number): BuildingType[] {
@@ -240,7 +260,7 @@ export function aiStep(g: Game, ai: AiPlayer): void {
     }
     const military = own.filter((b) => isMilitaryType(b.type));
     const building = military.filter((b) => b.constructing).length;
-    if (building === 0 && spareCarriers(g, ai.owner) >= CARRIER_RESERVE && military.length < KNOBS[ai.temperament].cap + (seek >= 0 ? SEEK_EXTRA : 0)) {
+    if (building === 0 && spareCarriers(g, ai.owner) >= CARRIER_RESERVE && military.length < Math.max(2, Math.round(KNOBS[ai.temperament].cap * skillOf(ai).cap)) + (seek >= 0 ? SEEK_EXTRA : 0)) {
       // towers soak up six swords each: not while it is short of them on the way to ore
       const stock = g.buildings[castle]!.stock;
       const forward = seek < 0 && military.length >= 3;
@@ -428,6 +448,9 @@ function connect(g: Game, owner: number, flag: number): boolean {
 function attack(g: Game, ai: AiPlayer): void {
   const knobs = KNOBS[ai.temperament];
   if (knobs.attack === 'never') return;
+  const skill = skillOf(ai);
+  if (knobs.attack === 'always' && (ai.age ?? Infinity) < skill.grace) return; // the opening: it builds, it does not yet fight
+  const odds = Math.max(1, knobs.odds + skill.odds);
   if (knobs.attack === 'provoked' && (ai.provoked < 0 || ((g.tick - ai.provoked) & 0xffff) > PROVOKED_TICKS)) return;
   const own = g.buildings[g.castleOf(ai.owner)]!.pos;
   let best: { target: Building; send: number; castle: boolean; ratio: number; d: number } | null = null;
@@ -438,8 +461,8 @@ function attack(g: Game, ai: AiPlayer): void {
     // how many of the knights it could send are enough to be worth `odds` times the defenders (it sends one more for luck)
     const defence = g.defencePower(t.index);
     let send = 1;
-    while (send < force.length && g.attackPower(ai.owner, force.slice(0, send)) < knobs.odds * defence) send++;
-    if (g.attackPower(ai.owner, force.slice(0, send)) < knobs.odds * defence) continue; // would lose: waits for more
+    while (send < force.length && g.attackPower(ai.owner, force.slice(0, send)) < odds * defence) send++;
+    if (g.attackPower(ai.owner, force.slice(0, send)) < odds * defence) continue; // would lose: waits for more
     send = Math.min(force.length, send + 1);
     const ratio = defence === 0 ? Infinity : g.attackPower(ai.owner, force.slice(0, send)) / defence;
     const cand = { target: t, send, castle: t.type === BuildingType.Castle, ratio, d: dist(g, t.pos, own) };

@@ -1,8 +1,9 @@
 // The computer opponent: it plays by the rules the player does, so these
 // check what it builds and does, and that a saved game replays it exactly.
 import { describe, expect, it } from 'vitest';
-import { BuildingType, Game, MOUNTAIN_LEVEL, MapObjects, OreKind, Res, SEA_LEVEL, Temperament, TerrainMap, flattenArea, generateObjects, hexDistance, toolFor } from '../src/index.ts';
+import { BuildingType, Difficulty, Game, MOUNTAIN_LEVEL, MapObjects, OreKind, Res, SEA_LEVEL, Temperament, TerrainMap, flattenArea, generateObjects, hexDistance, toolFor } from '../src/index.ts';
 import { run } from './scenarios.ts';
+import { SKILL, aiPeriod } from '../src/ai.ts';
 
 const T = BuildingType;
 
@@ -156,6 +157,59 @@ describe('temperament', { timeout: 30000 }, () => {
       if (g.attackers.some((a) => a.owner === 1)) struck = true;
     }
     expect(struck).toBe(true);
+  });
+});
+
+describe('difficulty', { timeout: 60000 }, () => {
+  /** Owner 1 aggressive at `difficulty`, owner 0 with a weakly held hut in its reach; the tick (game time) it first sends knights, or -1. */
+  function firstStrike(difficulty: Difficulty, limit: number): number {
+    const w = world(Temperament.Aggressive, 36);
+    w.ai.difficulty = difficulty;
+    const flag = w.g.addFlag(40, 30, 0);
+    w.g.setGarrison(w.g.addBuilding(T.Hut, flag), 1);
+    for (let i = 0; i < limit / w.g.speed; i++) {
+      w.g.update();
+      if (w.g.attackers.some((a) => a.owner === 1)) return i * w.g.speed; // in ticks
+    }
+    return -1;
+  }
+
+  it('Easy keeps its opening long: no first attack inside its grace, where Hard has already struck', () => {
+    expect(firstStrike(Difficulty.Easy, 120000)).toBe(-1);
+    const hard = firstStrike(Difficulty.Hard, 60000);
+    expect(hard).toBeGreaterThanOrEqual(0);
+    expect(hard).toBeGreaterThanOrEqual(SKILL[Difficulty.Hard].grace * 0.5); // not before its own (short) grace was nearly over
+    const normal = firstStrike(Difficulty.Normal, 120000);
+    expect(normal).toBeGreaterThanOrEqual(hard);
+    expect(normal).toBeGreaterThanOrEqual(SKILL[Difficulty.Normal].grace * 0.5);
+  });
+
+  it('bends its pace: slower on Easy, quicker on Hard, and never attacks on odds below even', () => {
+    const base = aiPeriod({ owner: 1, temperament: Temperament.Aggressive, cooldown: 0, provoked: -1, difficulty: Difficulty.Normal });
+    const at = (d: Difficulty) => aiPeriod({ owner: 1, temperament: Temperament.Aggressive, cooldown: 0, provoked: -1, difficulty: d });
+    expect(at(Difficulty.Easy)).toBeGreaterThan(base);
+    expect(at(Difficulty.Hard)).toBeLessThan(base);
+    expect(SKILL[Difficulty.Easy].grace).toBeGreaterThan(SKILL[Difficulty.Normal].grace);
+    expect(SKILL[Difficulty.Normal].grace).toBeGreaterThan(SKILL[Difficulty.Hard].grace);
+  });
+
+  it('is saved with its age, and an old save loads Normal with no grace', () => {
+    const w = world(Temperament.Aggressive);
+    w.ai.difficulty = Difficulty.Hard;
+    run(w.g, 3000);
+    const h = roundtrip(w.g);
+    expect(h.ais[0]!.difficulty).toBe(Difficulty.Hard);
+    expect(h.ais[0]!.age).toBe(w.g.ais[0]!.age);
+    expect(w.g.ais[0]!.age).toBeGreaterThan(0);
+
+    const data = w.g.serialize() as unknown as { ais: { difficulty?: Difficulty; age?: number }[] };
+    for (const a of data.ais) {
+      delete a.difficulty;
+      delete a.age;
+    }
+    const old = Game.restore(JSON.parse(JSON.stringify(data)) as Parameters<typeof Game.restore>[0]);
+    expect(old.ais[0]!.difficulty).toBe(Difficulty.Normal);
+    expect(old.ais[0]!.age).toBeUndefined(); // no opening grace for a game already under way
   });
 });
 

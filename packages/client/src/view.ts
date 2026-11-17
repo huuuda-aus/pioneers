@@ -40,12 +40,13 @@ import {
   type Road,
 } from '@sett/sim';
 import type { App } from './app.ts';
-import { BUILDING_LABEL, COLORS, OBJECT_COLORS, ORE_COLOR, RES_COLOR, TERRITORY_COLORS, WORKER_LETTER } from './palette.ts';
+import { BUILDING_COLOR, BUILDING_LABEL, COLORS, OBJECT_COLORS, ORE_COLOR, RES_COLOR, TERRITORY_COLORS, WORKER_LETTER } from './palette.ts';
 import { LAND, seaColor, clamp, dirtColor, fbm2, forestFloorColor, grassColor, hash2, leafColors, lerpColor, rockColor, sandColor, scaleColor, screeColor, slopeLight, snowAmount, speciesAt, waterColor, type Species } from './art.ts';
 import { GROUNDS, paintGround, type Ground } from './textures.ts';
 import { clipBand, contourSegment, distanceField, polyArea, wavyOutline, type Vert } from './coast.ts';
 import { blob, outline, roadMesh, smoothPath, type RoadMesh } from './roads.ts';
 import { drawBuildingArt, drawMilitaryBadge } from './buildings.ts';
+import { drawBuildingFar, drawFarRock, drawFarTrees, lodOf, type Lod } from './lod.ts';
 import { drawPerson, tradeOf, type Trade } from './people.ts';
 import { ROW_H, S, flatY, gridBounds, pickHex, posToWorld, toWorld, type Pt } from './projection.ts';
 
@@ -109,6 +110,7 @@ export class View {
   private depth: Uint8Array = new Uint8Array(0); // per point: steps to the nearest land for water points, 0 on land
   private time = 0; // seconds, for the water and the wind only
   private gSites = new Graphics();
+  private gFar = new Graphics(); // every tree and rock as a cheap stand-in, drawn once while zoomed out
   private gObjects = new Graphics();
   private labelLayer = new Container();
   private gOverlay = new Graphics();
@@ -119,6 +121,12 @@ export class View {
   private app!: App;
   private builtFor: Game | null = null;
   private roadsKey = ''; // what the road picture was last drawn for
+  private lod: Lod = 'near';
+  private frameNo = 0;
+  private farKey = ''; // the objects version gFar was drawn for
+  private waterPts: number[] | null = null; // map points that are water, found once
+  /** Smoothed milliseconds per frame section, for the `p` overlay. */
+  readonly perf: Record<string, number> = { frame: 0, water: 0, roads: 0, sites: 0, scene: 0, overlay: 0 };
   private geoVersion = -1; // layoutVersion the cached road geometry belongs to
   private siteCache: { key: string; positions: number[] } = { key: '', positions: [] };
 
@@ -142,7 +150,7 @@ export class View {
       texture.source.autoGenerateMipmaps = true;
       this.ground.set(kind, { texture, matrix: new Matrix().scale(GROUND_SCALE[kind], GROUND_SCALE[kind]) });
     }
-    this.world.addChild(this.ocean, this.terrain, this.gTerritory, this.gCoast, this.gWater, this.gClouds, this.gRoads, this.gSites, this.gObjects, this.labelLayer, this.gOverlay);
+    this.world.addChild(this.ocean, this.terrain, this.gTerritory, this.gCoast, this.gWater, this.gClouds, this.gRoads, this.gSites, this.gFar, this.gObjects, this.labelLayer, this.gOverlay);
     this.pixi.stage.addChild(this.world, this.gAtmos);
     this.bindInput();
     this.pixi.ticker.add((ticker) => {
@@ -254,15 +262,56 @@ export class View {
   // ---- frame -----------------------------------------------------------
 
   private draw(): void {
+    const t0 = performance.now();
     const game = this.app.game;
     if (this.builtFor !== game) this.rebuild(game);
-    this.drawWater(game);
+    const before = this.lod;
+    this.lod = lodOf(this.world.scale.x, this.lod);
+    const far = this.lod === 'far';
+    this.labelLayer.visible = !far;
+    // zoomed out the picture changes slowly: the busy layers are redrawn every few frames, the rest between
+    this.frameNo++;
+    const busy = !far || before !== this.lod || this.frameNo % FAR_EVERY === 0;
     this.drawSky();
+    if (busy) this.timed('water', () => this.drawWater(game));
     this.drawTerritory(game);
-    this.drawRoads(game);
-    this.drawSites(game);
-    this.drawScene(game);
-    this.drawOverlay(game);
+    this.timed('roads', () => this.drawRoads(game));
+    this.timed('sites', () => this.drawSites(game));
+    this.syncFar(game);
+    if (busy) this.timed('scene', () => this.drawScene(game));
+    this.timed('overlay', () => this.drawOverlay(game));
+    this.perf.frame = this.perf.frame * 0.9 + (performance.now() - t0) * 0.1;
+  }
+
+  private timed(name: string, f: () => void): void {
+    const t = performance.now();
+    f();
+    this.perf[name] = this.perf[name]! * 0.9 + (performance.now() - t) * 0.1;
+  }
+
+  /** The current detail tier, for the overlay. */
+  get detail(): Lod {
+    return this.lod;
+  }
+
+  /** Zoomed out: every tree and rock as a simple shape in one static layer, redrawn only when the objects change. */
+  private syncFar(game: Game): void {
+    const far = this.lod === 'far';
+    this.gFar.visible = far;
+    const o = game.objects;
+    if (!far || !o) return;
+    const key = String(o.version);
+    if (key === this.farKey) return;
+    this.farKey = key;
+    const g = this.gFar;
+    g.clear();
+    for (let p = 0; p < o.kind.length; p++) {
+      const kind = o.kind[p]!;
+      if (kind !== MapObject.Tree && kind !== MapObject.Stone) continue;
+      const w = posToWorld(game, p);
+      if (kind === MapObject.Tree) drawFarTrees(g, w.x, w.y, speciesAt(p % game.cols, Math.floor(p / game.cols), game.terrain.heightAt(p)), variety(p + 31));
+      else drawFarRock(g, w.x, w.y, o.amountAt(p));
+    }
   }
 
   /** Called when the game object is replaced (new scenario). */
@@ -273,6 +322,9 @@ export class View {
     this.roadsKey = '';
     this.siteCache = { key: '', positions: [] };
     this.territoryKey = '';
+    this.farKey = '';
+    this.waterPts = null;
+    this.gFar.clear();
     for (const t of this.labels.values()) t.destroy();
     this.labels.clear();
     this.buildTerrain(game);
@@ -713,6 +765,7 @@ export class View {
       for (let i = 1; i < run.length; i++) g.lineTo(run[i]!.x, run[i]!.y);
     }
     if (this.coastRuns.length > 0) g.stroke({ width: 10, color: 0xffffff, alpha: 0.1 + 0.1 * Math.sin(t * 1.4), cap: 'round', join: 'round' });
+    if (this.lod === 'far') return; // zoomed out: just the surf round the coast
     // glints on the open sea: bright dashes that come and go, thinning out far from the island
     const sea = this.sea;
     if (sea.w > 0) {
@@ -735,8 +788,11 @@ export class View {
         }
       }
     }
-    for (let p = 0; p < this.depth.length; p++) {
-      if (game.terrain.kindAt(p) !== Terrain.Water) continue;
+    if (!this.waterPts) {
+      this.waterPts = [];
+      for (let p = 0; p < this.depth.length; p++) if (game.terrain.kindAt(p) === Terrain.Water) this.waterPts.push(p);
+    }
+    for (const p of this.waterPts) {
       const w = posToWorld(game, p);
       if (w.x < x0 || w.x > x1 || w.y < y0 || w.y > y1) continue;
       const depth = this.depth[p]!;
@@ -1051,6 +1107,7 @@ export class View {
       const p = pointAt(geo.curve, u * CURVE_K);
       const key = valueAt(geo.flat, u) + 0.5;
       if (t.state === TState.Arriving) {
+        if (this.lod === 'far') continue;
         const e = geo.pts[t.at === 0 ? 0 : n]!;
         scene.push({
           key,
@@ -1059,6 +1116,11 @@ export class View {
         continue;
       }
       const walking = t.state === TState.Walking;
+      if (this.lod === 'far') {
+        // zoomed out a carrier is a dot, and one standing idle is not worth drawing
+        if (walking) scene.push({ key, draw: () => g.circle(p.x, p.y - 6, 5).fill({ color: t.item.type >= 0 ? RES_COLOR[t.item.type]! : 0xe8e0d0 }) });
+        continue;
+      }
       const ahead = pointAt(geo.curve, (u + (t.at === 0 ? 0.15 : -0.15)) * CURVE_K);
       const facing: 1 | -1 = ahead.x >= p.x ? 1 : -1;
       const phase = walking ? (u * S) / 8 : game.tick * 0.03 + t.road * 1.7;
@@ -1081,6 +1143,7 @@ export class View {
   private addObjects(game: Game, scene: Drawable[], g: Graphics): void {
     const o = game.objects;
     if (!o) return;
+    const far = this.lod === 'far';
     const scale = this.world.scale.x;
     const margin = 60;
     const x0 = -this.world.x / scale - margin;
@@ -1091,6 +1154,7 @@ export class View {
       const kind = o.kind[p]!;
       const sign = kind === MapObject.None ? o.sign[p]! : 0;
       if (kind === MapObject.None && sign === 0) continue;
+      if (far && (kind === MapObject.Tree || kind === MapObject.Stone)) continue; // in the static far layer
       const w = posToWorld(game, p);
       if (w.x < x0 || w.x > x1 || w.y < y0 || w.y > y1) continue;
       const key = flatY(Math.floor(p / game.cols)) + 0.3;
@@ -1150,8 +1214,27 @@ export class View {
     return geo;
   }
 
+  /** Zoomed out only the soldiers are worth showing: knights sent to attack, as a dot in their owner's colour. */
+  private addFarKnights(game: Game, scene: Drawable[], g: Graphics, alpha: number): void {
+    for (const a of game.attackers) {
+      const from = posToWorld(game, a.from);
+      const to = posToWorld(game, a.to);
+      const walking = a.phase === AttackPhase.Marching || a.phase === AttackPhase.Returning;
+      const k = walking && a.total > 0 ? clamp(1 - Math.max(0, a.counter - alpha * game.speed) / a.total, 0, 1) : 1;
+      const x = from.x + (to.x - from.x) * k;
+      const y = from.y + (to.y - from.y) * k;
+      const color = TERRITORY_COLORS[a.owner % TERRITORY_COLORS.length]!;
+      const row = flatY(Math.floor((a.phase === AttackPhase.Returning ? a.to : a.from) / game.cols)) + 0.6;
+      scene.push({ key: row, draw: () => g.circle(x, y - 8, 9).fill({ color }).stroke({ width: 2.5, color: 0x111111 }) });
+    }
+  }
+
   /** A new worker on his way from the storage to a finished building, with his trade's letter. */
   private addArrivals(game: Game, scene: Drawable[], g: Graphics, alpha: number): void {
+    if (this.lod === 'far') {
+      this.addFarKnights(game, scene, g, alpha);
+      return;
+    }
     const used = new Set<number>();
     for (const b of game.buildings) {
       if (b.removed || b.builderHome < 0 || b.walkTicks <= 0) continue;
@@ -1324,6 +1407,7 @@ export class View {
   }
 
   private addWorkers(game: Game, scene: Drawable[], g: Graphics, alpha: number): void {
+    if (this.lod === 'far') return;
     for (const b of game.buildings) {
       if (b.removed || b.constructing || b.target < 0 || b.state !== BState.Working || b.workTotal <= 0) continue;
       const home = this.buildingCentre(game, b);
@@ -1379,6 +1463,7 @@ export class View {
     g.ellipse(p.x, p.y, 7, 3.5).fill({ color: 0x000000, alpha: 0.3 });
     g.moveTo(p.x, p.y).lineTo(p.x, p.y - 22).stroke({ width: 2, color: 0x2b2b2b });
     g.poly([p.x, p.y - 22, p.x + 13, p.y - 18, p.x, p.y - 13]).fill({ color: COLORS.flag }).stroke({ width: 1, color: 0x222222 });
+    if (this.lod === 'far') return; // the goods waiting on it are too small to see
     for (let i = 0; i < FLAG_SLOTS; i++) {
       const it = fl.slot[i]!;
       if (it.type < 0) continue;
@@ -1403,6 +1488,14 @@ export class View {
     for (let r = 0; r < b.need.length; r++) {
       used += b.used[r]!;
       need += b.need[r]!;
+    }
+    if (this.lod === 'far') {
+      drawBuildingFar(g, c.x, c.y, w, h, BUILDING_COLOR[b.type] ?? 0x999999, b.constructing ? Math.min(0.99, used / Math.max(1, need)) : 1);
+      if (!b.constructing && garrisonCapacityOf(b.type) >= 0) {
+        const k = clamp(0.75 / this.world.scale.x, 1, 2.6);
+        drawMilitaryBadge(g, c.x, c.y - h * 1.55 - 12 * k, TERRITORY_COLORS[b.owner % TERRITORY_COLORS.length]!, isActiveMilitary(b), k);
+      }
+      return;
     }
     drawBuildingArt(g, {
       type: b.type,
@@ -1661,6 +1754,9 @@ function waterDepths(game: Game): Uint8Array {
 }
 
 /** Cosmetic variety from the point number alone, so a tree looks the same every frame. */
+/** Zoomed out, the busy layers are redrawn every this many frames. */
+const FAR_EVERY = 3;
+
 const variety = (p: number): number => (Math.imul(p + 1, 2654435761) >>> 0) / 4294967296;
 
 /**

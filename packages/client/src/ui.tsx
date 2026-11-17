@@ -29,8 +29,9 @@ import {
   garrisonCapacityOf,
   goldCapacityOf,
   Temperament,
+  Difficulty,
 } from '@sett/sim';
-import { TEMPERAMENT_NAME, type App, type Tool } from './app.ts';
+import { DIFFICULTY_NAME, TEMPERAMENT_NAME, type App, type Tool } from './app.ts';
 import { BUILDING_COLOR, BUILDING_NAME, RES_COLOR } from './palette.ts';
 import { SCENARIOS, type ScenarioId } from './scenarios.ts';
 import { View } from './view.ts';
@@ -75,10 +76,11 @@ const BUILD: ToolInfo[] = [
 const ALL_TOOLS: ToolInfo[] = [...TOOLS, ...BUILD];
 
 const SPEEDS: { label: string; speed: number }[] = [
-  { label: '1×', speed: 2 },
-  { label: '2×', speed: 4 },
-  { label: '4×', speed: 8 },
-  { label: '8×', speed: 16 },
+  { label: '1×', speed: 1 },
+  { label: '2×', speed: 2 },
+  { label: '4×', speed: 4 },
+  { label: '8×', speed: 8 },
+  { label: '16×', speed: 16 },
 ];
 
 const B_STATE = ['Idle', 'Working', 'Output blocked', 'Nothing in range', 'Worker on his way'];
@@ -129,6 +131,9 @@ export function Root({ app }: { app: App }) {
         app.setTool('select');
       } else if (e.key === 'f') {
         viewRef.current?.fit();
+      } else if (e.key === 'F3') {
+        e.preventDefault();
+        app.togglePerf();
       } else if (e.key === 'h') {
         viewRef.current?.home();
       } else {
@@ -291,6 +296,7 @@ export function Root({ app }: { app: App }) {
         <div class="canvas-host" ref={host}>
           <FlagMenu app={app} viewRef={viewRef} host={host} />
           <ThreatBanner app={app} viewRef={viewRef} />
+          {app.showPerf && viewRef.current && <PerfOverlay view={viewRef.current} />}
           <div class={app.toast ? 'toast' : 'toast hint'}>
             {app.toast || tool.help}
             {app.hoverInfo() && <div class="hint">{app.hoverInfo()}</div>}
@@ -489,7 +495,14 @@ function Opponent({ app }: { app: App }) {
           </option>
         ))}
       </select>
-      <p class="hint">Peaceful never attacks. Defensive hits back. Aggressive goes for weak garrisons.</p>
+      <select value={ai.difficulty ?? Difficulty.Normal} onChange={(e) => app.setDifficulty(Number(e.currentTarget.value))} title="How fast and sharply it plays. Easy waits a long time before its first attack, Hard strikes early.">
+        {([Difficulty.Easy, Difficulty.Normal, Difficulty.Hard] as const).map((d) => (
+          <option key={d} value={d}>
+            {DIFFICULTY_NAME[d]}
+          </option>
+        ))}
+      </select>
+      <p class="hint">Peaceful never attacks. Defensive hits back. Aggressive goes for weak garrisons, after an opening that gets shorter with difficulty.</p>
     </section>
   );
 }
@@ -690,6 +703,18 @@ function AttackPanel({ app, building }: { app: App; building: number }) {
         </button>
       )}
     </div>
+  );
+}
+
+/** Where the frame time goes (smoothed ms), for finding out what is slow at which zoom. Toggled with F3. */
+function PerfOverlay({ view }: { view: View }) {
+  const p = view.perf;
+  const fps = p.frame > 0 ? Math.round(1000 / Math.max(p.frame, 16.7)) : 0;
+  return (
+    <pre class="perf">
+      {`detail ${view.detail}  draw ${p.frame.toFixed(1)} ms (≤${fps} fps)\n` +
+        ['water', 'roads', 'sites', 'scene', 'overlay'].map((k) => `${k.padEnd(8)}${p[k]!.toFixed(2)} ms`).join('\n')}
+    </pre>
   );
 }
 

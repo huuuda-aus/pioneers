@@ -2,10 +2,16 @@
 // and selection, and every command that changes the sim. The renderer and the
 // panels only read from here.
 
-import { type Alert, AttackPhase, BuildingType, Game, Temperament, MapObject, ORE_NAMES, SIGN_EMPTY, buildNeeds, type OreKind, Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
+import { type Alert, AttackPhase, BuildingType, Difficulty, Game, Temperament, MapObject, ORE_NAMES, SIGN_EMPTY, buildNeeds, type OreKind, Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
 import { BUILDING_NAME } from './palette.ts';
 import { type KV, exportSave, importSave, readSave, writeSave } from './persistence.ts';
 import { makeScenario, type ScenarioId } from './scenarios.ts';
+
+export const DIFFICULTY_NAME: Record<Difficulty, string> = {
+  [Difficulty.Easy]: 'Easy',
+  [Difficulty.Normal]: 'Normal',
+  [Difficulty.Hard]: 'Hard',
+};
 
 export const TEMPERAMENT_NAME: Record<Temperament, string> = {
   [Temperament.Peaceful]: 'peaceful',
@@ -13,6 +19,8 @@ export const TEMPERAMENT_NAME: Record<Temperament, string> = {
   [Temperament.Aggressive]: 'aggressive',
 };
 
+/** Sim ticks per 20 ms step at the "1×" setting (a carrier then takes 80 ticks, 1.6 s, per flat tile). It used to be 2, which ran too fast. */
+export const NORMAL_SPEED = 1;
 export const STEP_MS = 20; // 50 Hz, like the original on the vertical blank
 const MAX_CATCH_UP = 5; // beyond this the game slows down instead of freezing
 /** After a command, wait this long (real ms) for more before saving: a burst of clicks is one write. */
@@ -167,7 +175,7 @@ export class App {
   private commandPending = false; // the player changed something since the last write
   private saveFailing = false;
   private acc = 0;
-  private lastSpeed = 2;
+  private lastSpeed = NORMAL_SPEED;
   private listeners = new Set<() => void>();
   private toastTimer: ReturnType<typeof setTimeout> | undefined;
   private sinceNotify = 0;
@@ -184,11 +192,12 @@ export class App {
       this.game = loaded.game;
       this.game.settlers = true; // games saved before workers walked in get it too
       this.lastSaved = loaded.savedAt;
-      this.lastSpeed = loaded.game.speed > 0 ? loaded.game.speed : 2;
+      this.lastSpeed = loaded.game.speed > 0 ? loaded.game.speed : NORMAL_SPEED;
       this.toast = 'Continued your saved game.';
       this.toastTimer = setTimeout(() => this.say(''), 3500);
     } else {
       this.game = makeScenario(scenario);
+      this.game.speed = NORMAL_SPEED;
       if (loaded.kind === 'broken') {
         this.toast = `The saved game could not be loaded (${loaded.reason}); a new one was started. The old data is kept under "sett.save.broken".`;
       }
@@ -267,7 +276,7 @@ export class App {
     this.resultSeen = false;
     this.resultDismissed = false;
     this.game.settlers = true; // games saved before workers walked in get it too
-    this.lastSpeed = result.game.speed > 0 ? result.game.speed : 2;
+    this.lastSpeed = result.game.speed > 0 ? result.game.speed : NORMAL_SPEED;
     this.lastSaved = null; // not yet written to this browser's slot
     this.acc = 0;
     this.selection = null;
@@ -422,6 +431,15 @@ export class App {
     this.changed();
   }
 
+  setDifficulty(d: Difficulty): void {
+    const ai = this.opponent;
+    if (!ai) return;
+    ai.difficulty = d;
+    this.say(`The opponent now plays on ${DIFFICULTY_NAME[d]}.`);
+    this.commanded();
+    this.changed();
+  }
+
   /** Why the player cannot attack this building now (empty if they can), and how many knights could go. */
   attackOptions(building: number): { ok: boolean; reason: string; available: number } {
     const c = this.game.checkAttack(0, building);
@@ -557,6 +575,14 @@ export class App {
     this.changed();
   }
 
+  /** The performance overlay (F3): frame time per drawing section and the detail tier. Not saved. */
+  showPerf = false;
+
+  togglePerf(): void {
+    this.showPerf = !this.showPerf;
+    this.changed();
+  }
+
   /** What has happened between the two sides, newest first (not saved with the game). */
   log: LogEntry[] = [];
   /** Entries added since the player last looked at the log. */
@@ -596,6 +622,8 @@ export class App {
 
   loadScenario(id: ScenarioId): void {
     this.game = makeScenario(id);
+    this.game.speed = NORMAL_SPEED;
+    this.lastSpeed = NORMAL_SPEED;
     this.log = [];
     this.unreadLog = 0;
     this.resultSeen = false;

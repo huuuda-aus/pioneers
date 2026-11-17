@@ -115,6 +115,8 @@ export const HOME_MORALE = 4096; // a knight's land factor on his own ground
 /** Gold a garrison keeps for promotions and morale (freeserf's max_gold). */
 export const GOLD_CAPACITY: Partial<Record<BuildingType, number>> = {};
 export enum Temperament { Peaceful, Defensive, Aggressive }
+/** How well and how fast an opponent plays, whatever its temperament. */
+export enum Difficulty { Easy, Normal, Hard }
 
 /** A computer opponent: who it plays, how, when it next thinks, and when it was last attacked (-1 never). */
 export interface AiPlayer {
@@ -122,6 +124,10 @@ export interface AiPlayer {
   temperament: Temperament;
   cooldown: number;
   provoked: number;
+  /** Absent in saves made before difficulty: Normal. */
+  difficulty?: Difficulty;
+  /** Ticks of its own time it has lived (grows by its decision period each step; unlike `Game.tick` it never wraps). Absent in old saves: no grace. */
+  age?: number;
 }
 
 export enum AttackPhase { Marching, Waiting, Fighting, Returning }
