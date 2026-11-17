@@ -310,16 +310,16 @@ them. (There is only ever one castle, and it can't be built.)
   time per building, retried every 300 ticks if none could be armed. A
   **Weaponsmith** melts one coal and one iron into a sword or a shield, one
   cycle at a time, picking whichever of the two is behind so they come out in
-  roughly equal numbers. No combat yet: garrisoned knights just sit there,
-  and the castle has no garrison of its own (its territory comes from being
-  fixed, not from who's inside). No gold-funded morale either — that only
-  matters once there's a fight to resolve. Hut/Tower/Fortress and Weaponsmith
-  have no art of their own yet; they borrow the smelter's shape, tinted.
-  TypeScript only.
+  roughly equal numbers. The castle holds up to 6 knights too, but arms them
+  itself from its own stock of swords and shields with no walk (and does not
+  spend its gold on promotions); it holds its land whether or not anyone is
+  inside, and it is not one of the garrison buildings the soft cap counts.
+  Hut/Tower/Fortress and Weaponsmith have no art of their own yet; they
+  borrow the smelter's shape, tinted. TypeScript only.
 - **Combat** (`Game.sendAttack`, `updateAttackers`): from a garrison with more
   than one knight (`MIN_GARRISON`; the last never leaves) knights can be sent
-  against an enemy finished Hut/Tower/Fortress within 16 steps (`checkAttack`;
-  the castle has no garrison yet, so it can't be attacked). They march
+  against an enemy finished Hut/Tower/Fortress or castle within 16 steps
+  (`checkAttack`). They march
   straight over the land, one defender steps out and they duel for 300 ticks:
   a single deterministic roll (`hash01` on attacker id and tick, so a save
   replays the same fight), win chance `morale / (morale + defender's)`, equal
@@ -338,8 +338,14 @@ them. (There is only ever one castle, and it can't be built.)
   a garrison keeps up to 2/4/8 gold (delivered by the normal logistics) and
   every 1500 ticks spends one to promote its lowest knight a step; without
   gold a slow `hash01` roll does it for free (freeserf's training odds,
-  scaled). The strongest knight goes out to attack and to defend. No castle
-  garrison, retreat or threat-level matrix yet. TypeScript only.
+  scaled). The strongest knight goes out to attack and to defend. **A castle that
+  loses its last defender to an attacker is destroyed** (freeserf: it burns,
+  nothing occupies it) and its owner is out (`Game.defeated`); `Game.winner()`
+  is the last owner standing once two or more have had a castle, so a game
+  with one castle never ends. A burning castle holds no land, so what stood
+  on it is torn down as the border moves; the AI of a defeated owner stops;
+  the client shows Victory or Defeat once and stops the clock. No retreat or
+  threat-level matrix yet. TypeScript only.
 - **The opponent** (`ai.ts`, `Game.ais`, `Game.addAi`): a computer player that
   plays by the player's rules. Every `period` ticks (450 / 300 / 200 for a
   peaceful / defensive / aggressive temperament) it makes one decision: first

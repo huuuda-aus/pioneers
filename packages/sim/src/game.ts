@@ -410,6 +410,8 @@ export class Game {
   alerts: Alert[] = [];
   /** Computer opponents. */
   ais: AiPlayer[] = [];
+  /** Owners whose castle has fallen: they are out of the game. */
+  defeated: number[] = [];
   /** Ore a geologist has just found: the screen reads it and clears it. Not saved. */
   discoveries: { pos: number; kind: OreKind }[] = [];
   /** What the toolmakers should make: a weight per tool kind (index into TOOL_KINDS), 0 to TOOL_MAX. */
@@ -1369,7 +1371,7 @@ export class Game {
     }
     if (garrisonCapacityOf(b.type) >= 0) {
       this.updateGarrison(b, delta);
-      return;
+      if (!isStore(b)) return; // the castle goes on to be a storage too
     }
     const planter = b.type === BuildingType.Forester;
     if (planter && !this.objects) return; // nothing to plant on
@@ -1767,6 +1769,15 @@ export class Game {
   private updateGarrison(b: Building, delta: number): void {
     this.trainKnights(b, delta);
     if (b.garrison >= garrisonCapacityOf(b.type)) return;
+    if (isStore(b)) {
+      // the castle arms its own knights from its stock, no walk (and no state of its own: its fields are in the parity hash)
+      if (this.tick % KNIGHT_RECRUIT_PERIOD < delta && b.stock[Res.Sword]! > 0 && b.stock[Res.Shield]! > 0) {
+        b.stock[Res.Sword]!--;
+        b.stock[Res.Shield]!--;
+        this.addKnight(b, 0);
+      }
+      return;
+    }
     b.counter -= delta;
     if (b.counter > 0) return;
     b.counter = KNIGHT_RECRUIT_PERIOD;
@@ -1776,7 +1787,7 @@ export class Game {
 
   /** The garrison buildings an owner has (finished or not, not burning). */
   garrisonBuildingsOf(owner: number): number {
-    return this.buildings.filter((b) => !b.removed && b.burning === 0 && b.owner === owner && garrisonCapacityOf(b.type) >= 0).length;
+    return this.buildings.filter((b) => !b.removed && b.burning === 0 && b.owner === owner && garrisonCapacityOf(b.type) >= 0 && b.type !== BuildingType.Castle).length;
   }
 
   /** Knights an owner has: inside garrisons, walking to one, or out attacking. */
@@ -2044,6 +2055,7 @@ export class Game {
       nextKnight: this.nextKnight,
       attackers: this.attackers,
       ais: this.ais,
+      defeated: this.defeated,
       nextAttacker: this.nextAttacker,
       flags: this.flags,
       roads: this.roads,
@@ -2107,6 +2119,7 @@ export class Game {
     g.knights = d.knights ?? [];
     g.nextKnight = d.nextKnight ?? g.knights.length;
     g.ais = d.ais ?? [];
+    g.defeated = d.defeated ?? [];
     g.attackers = (d.attackers ?? []).map((a) => ({ ...a, rank: a.rank ?? 0, defRank: a.defRank ?? -1 }));
     g.nextAttacker = d.nextAttacker ?? g.attackers.length;
     g.flags = d.flags;
@@ -2479,7 +2492,7 @@ export class Game {
     b.train -= delta;
     if (b.train > 0) return;
     b.train = TRAIN_TICKS;
-    if (b.stock[Res.Gold]! > 0) {
+    if (b.stock[Res.Gold]! > 0 && !isStore(b)) {
       if (this.promoteOne(b)) {
         b.stock[Res.Gold]!--;
         this.consumed[Res.Gold]!++;
@@ -2610,8 +2623,7 @@ export class Game {
             a.phase = AttackPhase.Fighting;
             a.counter = a.total = FIGHT_TICKS;
           } else {
-            this.captureBuilding(t!, a);
-            continue; // he is the garrison now
+            if (this.captureBuilding(t!, a)) continue; // he is the garrison now
           }
         }
       } else if (a.phase === AttackPhase.Fighting) {
@@ -2643,7 +2655,11 @@ export class Game {
   }
 
   /** The last defender is gone and an attacker stands at the door: the building is his (ported from freeserf's occupy_enemy_building). */
-  private captureBuilding(t: Building, a: Attacker): void {
+  private captureBuilding(t: Building, a: Attacker): boolean {
+    if (t.type === BuildingType.Castle) {
+      this.fallCastle(t, a);
+      return false;
+    }
     const loser = t.owner;
     const f = this.flags[t.flag]!;
     for (const ri of f.road) if (ri >= 0 && !this.roads[ri]!.removed) this.demolishRoad(ri);
@@ -2675,6 +2691,30 @@ export class Game {
     this.alerts.push({ kind: 'captured', owner: a.owner, building: t.index });
     this.alerts.push({ kind: 'lost', owner: loser, building: t.index });
     for (const o of this.attackers) if (o !== a && o.target === t.index && o.phase !== AttackPhase.Returning) this.startReturn(o);
+    return true;
+  }
+
+  /** A castle with no one left to defend it is destroyed, and its owner is out of the game. */
+  private fallCastle(t: Building, a: Attacker): void {
+    const loser = t.owner;
+    if (!this.defeated.includes(loser)) this.defeated.push(loser);
+    t.garrison = 0;
+    t.veterans = [0, 0, 0, 0];
+    t.burning = BURN_TICKS;
+    t.tick = this.tick;
+    this.layoutVersion++;
+    this.updateLandOwnership(this.posOf(t)); // a burning castle holds no land
+    this.alerts.push({ kind: 'defeated', owner: loser, building: t.index });
+    this.alerts.push({ kind: 'captured', owner: a.owner, building: t.index });
+    for (const o of this.attackers) if (o.target === t.index && o.phase !== AttackPhase.Returning) this.startReturn(o);
+  }
+
+  /** The owner left standing once every other castle has fallen, or -1 while the game is on (or has only ever had one castle). */
+  winner(): number {
+    const owners = new Set<number>([...this.castleByOwner.keys(), ...this.defeated]);
+    if (owners.size < 2) return -1;
+    const alive = [...owners].filter((o) => !this.defeated.includes(o));
+    return alive.length === 1 ? alive[0]! : -1;
   }
 
   // ---- territory ---------------------------------------------------------

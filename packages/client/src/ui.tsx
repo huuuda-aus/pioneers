@@ -273,6 +273,20 @@ export function Root({ app }: { app: App }) {
           </div>
         </div>
       )}
+      {app.result && !app.resultDismissed && (
+        <div class="menu" role="dialog" aria-label={app.result === 'won' ? 'Victory' : 'Defeat'}>
+          <div class="menu-card">
+            <h1>{app.result === 'won' ? 'Victory!' : 'Defeat'}</h1>
+            <p class="menu-sub">{app.result === 'won' ? "The rival's castle has fallen." : 'Your castle has fallen.'}</p>
+            <button class="primary" onClick={() => app.dismissResult()}>
+              Look around
+            </button>
+            <button class="primary" onClick={() => app.openMenu()}>
+              Main menu
+            </button>
+          </div>
+        </div>
+      )}
       <div class="stage">
         <div class="canvas-host" ref={host}>
           <FlagMenu app={app} viewRef={viewRef} host={host} />
@@ -696,10 +710,14 @@ function Inspector({ app }: { app: App }) {
               {b.garrison} of {garrisonCapacityOf(b.type)}
               {b.veterans.some((v) => v > 0) && ` (ranks ${g.knightRanks(b).map((n, r) => (n > 0 ? `${r}×${n}` : '')).filter(Boolean).join(', ')})`}
             </span>
-            <span>Gold</span>
-            <span>
-              {b.stock[Res.Gold]} of {goldCapacityOf(b.type)}
-            </span>
+            {goldCapacityOf(b.type) > 0 && (
+              <>
+                <span>Gold</span>
+                <span>
+                  {b.stock[Res.Gold]} of {goldCapacityOf(b.type)}
+                </span>
+              </>
+            )}
             <span>Away strength</span>
             <span title="Held gold raises every knight's strength away from home (4096 = no gold anywhere, even with defenders)">{g.awayMorale(b.owner)}</span>
           </div>

@@ -13,14 +13,15 @@ describe('a hut', () => {
   it('fills to capacity given enough swords and shields, and stops asking', () => {
     const c = new CastleColony();
     const g = c.g;
-    g.addStock(c.castle, Res.Sword, 10);
-    g.addStock(c.castle, Res.Shield, 10);
+    g.addStock(c.castle, Res.Sword, 20);
+    g.addStock(c.castle, Res.Shield, 20);
     const hut = g.addBuilding(T.Hut, c.f[0]!);
     run(g, 6000);
     expect(g.buildings[hut]!.garrison).toBe(3);
     expect(g.knights.length).toBe(0);
-    expect(g.buildings[c.castle]!.stock[Res.Sword]).toBe(7);
-    expect(g.buildings[c.castle]!.stock[Res.Shield]).toBe(7);
+    expect(g.buildings[c.castle]!.garrison).toBe(6); // the castle armed its own six
+    expect(g.buildings[c.castle]!.stock[Res.Sword]).toBe(11); // 20 less 3 for the hut and 6 for the castle
+    expect(g.buildings[c.castle]!.stock[Res.Shield]).toBe(11);
   });
 
   it('stays empty without a sword and a shield to arm one', () => {
@@ -58,6 +59,31 @@ describe('a weaponsmith', () => {
     expect(g.created[Res.Sword]!).toBeGreaterThan(5);
     expect(Math.abs(g.created[Res.Sword]! - g.created[Res.Shield]!)).toBeLessThanOrEqual(1);
     expect(g.buildings[smith]!.constructing).toBe(false);
+  });
+});
+
+describe('the castle\'s own garrison', () => {
+  it('fills to six from its own stock and stops without swords, using no gold on promotions', () => {
+    const c = new CastleColony();
+    const g = c.g;
+    const castle = g.buildings[c.castle]!;
+    g.addStock(c.castle, Res.Sword, 4);
+    g.addStock(c.castle, Res.Shield, 4);
+    g.addStock(c.castle, Res.Gold, 3);
+    run(g, 20000);
+    expect(castle.garrison).toBe(4);
+    expect(castle.stock[Res.Sword]).toBe(0);
+    g.addStock(c.castle, Res.Sword, 9);
+    g.addStock(c.castle, Res.Shield, 9);
+    run(g, 20000);
+    expect(castle.garrison).toBe(6);
+    expect(castle.stock[Res.Gold]).toBe(3);
+  });
+
+  it('does not count as one of the garrison buildings the soft cap limits', () => {
+    const g = new Game(40, 20);
+    g.placeBuilding(T.Castle, g.index(10, 10), false, 0);
+    expect(g.garrisonBuildingsOf(0)).toBe(0);
   });
 });
 

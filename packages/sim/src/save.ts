@@ -26,6 +26,7 @@ export interface SaveData {
   knights?: Knight[]; // absent in saves made before garrisons
   nextKnight?: number;
   attackers?: Attacker[]; // absent in saves made before combat
+  defeated?: number[]; // absent in saves made before the game could be won
   ais?: AiPlayer[]; // absent in saves made before computer opponents
   nextAttacker?: number;
   toolShare?: number[]; // absent in saves made before there were kinds of tool

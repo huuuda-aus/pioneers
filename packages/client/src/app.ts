@@ -250,6 +250,8 @@ export class App {
       return false;
     }
     this.game = result.game;
+    this.resultSeen = false;
+    this.resultDismissed = false;
     this.game.settlers = true; // games saved before workers walked in get it too
     this.lastSpeed = result.game.speed > 0 ? result.game.speed : 2;
     this.lastSaved = null; // not yet written to this browser's slot
@@ -302,6 +304,12 @@ export class App {
     if (g.discoveries.length > 0) {
       const found = g.discoveries.splice(0);
       this.say(`Your geologist found ${[...new Set(found.map((d) => ORE_NAMES[d.kind]))].join(' and ')}!`);
+    }
+    if (this.result && !this.resultSeen) {
+      this.resultSeen = true;
+      this.resultDismissed = false;
+      g.speed = 0; // stop where it ended
+      this.changed();
     }
     if (g.alerts.length > 0) {
       const mine = g.alerts.splice(0).filter((a) => a.owner === 0);
@@ -375,6 +383,21 @@ export class App {
   }
 
   /** The player picked a building in the Build list: a site goes up here, its door on this flag. */
+  /** How the game ended for the player, once a castle has fallen. */
+  get result(): 'won' | 'lost' | null {
+    if (this.game.defeated.includes(0)) return 'lost';
+    return this.game.winner() === 0 ? 'won' : null;
+  }
+
+  private resultSeen = false;
+  /** The player has closed the Victory/Defeat card and wants to look around. */
+  resultDismissed = false;
+
+  dismissResult(): void {
+    this.resultDismissed = true;
+    this.changed();
+  }
+
   /** The computer opponent, if the game has one. */
   get opponent() {
     return this.game.ais[0] ?? null;
@@ -490,6 +513,8 @@ export class App {
 
   loadScenario(id: ScenarioId): void {
     this.game = makeScenario(id);
+    this.resultSeen = false;
+    this.resultDismissed = false;
     this.selection = null;
     this.menu = null;
     this.roadStart = -1;

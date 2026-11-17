@@ -175,6 +175,22 @@ describe('two colonies', () => {
     expect(app.toast).toMatch(/captured|lost|under attack|Sent/i);
   });
 
+  it('ends the game when a castle falls: you see the result once, and the clock stops', () => {
+    const app = new App('territory', null);
+    const theirs = app.game.castleOf(1);
+    expect(app.result).toBeNull();
+    // a knight at the door of an undefended castle
+    app.game.buildings[theirs]!.garrison = 0;
+    const mine = app.game.buildings.find((b) => b.type === BuildingType.Hut && b.owner === 0)!;
+    app.game.setGarrison(mine.index, 3);
+    app.game.attackers.push({ id: 900, owner: 0, home: mine.index, target: theirs, phase: 1, from: 0, to: 0, counter: 0, total: 0, rank: 0, defRank: -1 });
+    for (let i = 0; i < 40 && !app.result; i++) app.frame(20);
+    expect(app.result).toBe('won');
+    expect(app.game.speed).toBe(0);
+    app.dismissResult();
+    expect(app.resultDismissed).toBe(true);
+  });
+
   it('lets you change how the opponent plays, and it builds out over time', () => {
     const app = new App('territory', null);
     app.setTemperament(Temperament.Aggressive);

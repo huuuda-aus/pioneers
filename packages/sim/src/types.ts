@@ -140,7 +140,7 @@ export interface Attacker {
 
 /** Something the player should hear about: an attack on, or a change of hands of, one of their buildings. */
 export interface Alert {
-  kind: 'attacked' | 'captured' | 'lost';
+  kind: 'attacked' | 'captured' | 'lost' | 'defeated';
   owner: number; // who it concerns
   building: number;
 }
@@ -212,6 +212,7 @@ export const GARRISON_CAPACITY: Partial<Record<BuildingType, number>> = {
   [BuildingType.Hut]: 3,
   [BuildingType.Tower]: 6,
   [BuildingType.Fortress]: 12,
+  [BuildingType.Castle]: 6, // arms its own knights, no walk
 };
 GOLD_CAPACITY[BuildingType.Hut] = 2;
 GOLD_CAPACITY[BuildingType.Tower] = 4;
@@ -327,7 +328,7 @@ export function militaryStrength(b: Building): number {
 export function isActiveMilitary(b: Building): boolean {
   if (militaryStrength(b) < 0) return false;
   const cap = garrisonCapacityOf(b.type);
-  return cap < 0 || b.garrison > 0;
+  return b.type === BuildingType.Castle || cap < 0 || b.garrison > 0;
 }
 
 /**

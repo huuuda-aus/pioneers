@@ -192,7 +192,8 @@ describe('mining and the weapons chain', { timeout: 60000 }, () => {
   it('builds food, mines, a smelter and a weaponsmith, and makes the swords it garrisons with', () => {
     const { g } = miningWorld({ ore: 6 });
     run(g, 160000);
-    for (const type of [T.CoalMine, T.IronMine, T.IronSmelter, T.Weaponsmith]) expect(countOf(g, 1, type), T[type]).toBe(1);
+    for (const type of [T.IronMine, T.IronSmelter, T.Weaponsmith]) expect(countOf(g, 1, type), T[type]).toBe(1);
+    expect(countOf(g, 1, T.CoalMine)).toBe(2); // coal feeds the smelter and the weaponsmith
     expect(countOf(g, 1, T.Fisher) + countOf(g, 1, T.Baker)).toBeGreaterThan(0);
     expect(g.created[Res.Sword]!).toBeGreaterThan(0);
     expect(g.created[Res.Shield]!).toBeGreaterThan(0);
@@ -200,7 +201,7 @@ describe('mining and the weapons chain', { timeout: 60000 }, () => {
   });
 
   it('expands toward ore that lies beyond its land, then mines it', () => {
-    const { g, plateau } = miningWorld({ ore: 13, swords: 6 });
+    const { g, plateau } = miningWorld({ ore: 13, swords: 14 });
     const point = g.index(plateau[0], plateau[1]);
     expect(g.ownerAt[point]).not.toBe(1);
     run(g, 200000);
@@ -209,7 +210,7 @@ describe('mining and the weapons chain', { timeout: 60000 }, () => {
   });
 
   it('never builds a mine where there is no ore, and carries on with the rest', () => {
-    const { g } = miningWorld({ ore: null, swords: 6 });
+    const { g } = miningWorld({ ore: null, swords: 14 });
     run(g, 80000);
     for (const type of [T.CoalMine, T.IronMine, T.GoldMine]) expect(countOf(g, 1, type), T[type]).toBe(0);
     expect(countOf(g, 1, T.Sawmill)).toBe(1);

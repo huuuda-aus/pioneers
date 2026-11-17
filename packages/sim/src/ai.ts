@@ -37,7 +37,7 @@ const ECONOMY: [BuildingType, number][] = [
   [BuildingType.Forester, 1],
 ];
 
-const isMilitaryType = (t: BuildingType): boolean => garrisonCapacityOf(t) >= 0;
+const isMilitaryType = (t: BuildingType): boolean => t !== BuildingType.Castle && garrisonCapacityOf(t) >= 0;
 
 export const aiPeriod = (ai: AiPlayer): number => KNOBS[ai.temperament].period;
 
@@ -53,13 +53,16 @@ function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number): Buil
   }
   const fights = ai.temperament !== Temperament.Peaceful;
   // each link only once what feeds it stands: no smelter before its mine
+  // coal feeds the smelters and the weaponsmith: one mine is not enough once all of them run
   const chain: BuildingType[] = [T.CoalMine, T.IronMine];
+  if (count(T.Weaponsmith) > 0 && count(T.CoalMine) < 2) out.push(T.CoalMine);
   if (count(T.IronMine) > 0) chain.push(T.IronSmelter);
   if (count(T.IronSmelter) > 0) {
     if (g.tools) chain.push(T.Toolmaker);
     chain.push(T.Weaponsmith);
   }
-  if (fights) {
+  // gold (morale, promotion) only once iron is really going into weapons, so it does not starve them of coal
+  if (fights && g.consumed[Res.Iron]! >= 6) {
     chain.push(T.GoldMine);
     if (count(T.GoldMine) > 0) chain.push(T.GoldSmelter);
   }
@@ -70,7 +73,7 @@ function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number): Buil
 /** One decision: the first thing that can be done is done. */
 export function aiStep(g: Game, ai: AiPlayer): void {
   const castle = g.castleOf(ai.owner);
-  if (castle < 0) return;
+  if (castle < 0 || g.defeated.includes(ai.owner)) return;
   const own = g.buildings.filter((b) => !b.removed && b.burning === 0 && b.owner === ai.owner);
   const count = (t: BuildingType): number => own.filter((b) => b.type === t).length;
   const sites = own.filter((b) => b.constructing).length;

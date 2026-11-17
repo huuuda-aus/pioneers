@@ -45,11 +45,11 @@ describe('who can be attacked', () => {
     expect(site.checkAttack(0, unfinished).reason).toMatch(/not finished/);
   });
 
-  it('never the castle', () => {
+  it('a castle can be attacked like anything with a garrison', () => {
     const g = new Game(60, 30);
     g.buildings[g.addBuilding(T.Hut, g.addFlag(10, 10, 0))]!.garrison = 3;
     const castle = g.placeBuilding(T.Castle, g.index(25, 10), false, 1);
-    expect(g.checkAttack(0, castle).reason).toMatch(/only a hut, tower or fortress/);
+    expect(g.checkAttack(0, castle).ok).toBe(true);
   });
 });
 
@@ -220,6 +220,63 @@ describe('capturing a building', () => {
     g.knights.push({ id: 99, home: 0, building: b, counter: 100000, total: 100000 });
     run(g, 2000);
     expect(g.knights.some((k) => k.building === b)).toBe(false);
+  });
+});
+
+describe('the end of the game', () => {
+  /** Owner 0's hut with `mine` knights, owner 1's castle with `theirs` inside. */
+  function siege(mine: number, theirs: number) {
+    const g = new Game(60, 30);
+    const hut = g.addBuilding(T.Hut, g.addFlag(10, 10, 0));
+    g.buildings[hut]!.garrison = mine;
+    const west = g.placeBuilding(T.Castle, g.index(45, 10), false, 0); // owner 0's own castle, so there are two sides
+    const castle = g.placeBuilding(T.Castle, g.index(25, 10), false, 1);
+    g.buildings[castle]!.garrison = theirs;
+    return { g, hut, castle, west };
+  }
+
+  it('an undefended castle falls to the first knight, burns, and its owner has lost', () => {
+    const { g, castle } = siege(3, 0);
+    expect(g.winner()).toBe(-1);
+    g.sendAttack(0, castle, 2);
+    run(g, 3000);
+    expect(g.buildings[castle]!.burning > 0 || g.buildings[castle]!.removed).toBe(true); // burnt out by now
+    expect(g.defeated).toEqual([1]);
+    expect(g.winner()).toBe(0);
+    expect(g.attackers.length).toBe(0);
+    expect(g.alerts.some((a) => a.kind === 'defeated' && a.owner === 1)).toBe(true);
+  });
+
+  it('a defended castle holds until its knights are beaten, and the attackers come home when it falls', () => {
+    let fell = 0;
+    for (let i = 0; i < 30; i++) {
+      const { g, castle, hut } = siege(3, 1);
+      g.tick = i * 53;
+      g.sendAttack(0, castle, 2);
+      run(g, 6000);
+      expect(g.attackers.length).toBe(0);
+      if (g.defeated.length > 0) {
+        fell++;
+        expect(g.buildings[hut]!.garrison + g.buildings[castle]!.garrison).toBeLessThanOrEqual(3);
+      }
+    }
+    expect(fell).toBeGreaterThan(5);
+    expect(fell).toBeLessThan(30);
+  });
+
+  it('a game with one castle never has a winner, and a save keeps who has lost', () => {
+    const solo = new Game(30, 30);
+    solo.placeBuilding(T.Castle, solo.index(10, 10), false, 0);
+    expect(solo.winner()).toBe(-1);
+    const { g, castle } = siege(3, 0);
+    g.sendAttack(0, castle, 1);
+    run(g, 3000);
+    const h = roundtrip(g);
+    expect(h.defeated).toEqual([1]);
+    expect(h.winner()).toBe(0);
+    const old = g.serialize() as unknown as Record<string, unknown>;
+    delete old.defeated;
+    expect(Game.restore(JSON.parse(JSON.stringify(old)) as Parameters<typeof Game.restore>[0]).defeated).toEqual([]);
   });
 });
 
