@@ -4,6 +4,8 @@
 // parity tests pin the two together.
 
 import {
+  type AiPlayer,
+  Temperament,
   ATTACK_RANGE,
   HOME_MORALE,
   RANK_MAX,
@@ -63,6 +65,7 @@ import {
   STEP_TICKS,
 } from './types.ts';
 
+import { aiPeriod, aiStep } from './ai.ts';
 import { Terrain, TerrainMap, hash01, hexDistance } from './terrain.ts';
 import {
   FIELD_RADIUS,
@@ -405,6 +408,8 @@ export class Game {
   private nextAttacker = 0;
   /** Things the screen should tell the player about: the client reads and clears it. Not saved. */
   alerts: Alert[] = [];
+  /** Computer opponents. */
+  ais: AiPlayer[] = [];
   /** Ore a geologist has just found: the screen reads it and clears it. Not saved. */
   discoveries: { pos: number; kind: OreKind }[] = [];
   /** What the toolmakers should make: a weight per tool kind (index into TOOL_KINDS), 0 to TOOL_MAX. */
@@ -1139,6 +1144,13 @@ export class Game {
     if (this.geologists.length > 0) this.updateGeologists(this.speed);
     if (this.knights.length > 0) this.updateKnights(this.speed);
     if (this.attackers.length > 0) this.updateAttackers(this.speed);
+    for (const ai of this.ais) {
+      ai.cooldown -= this.speed;
+      if (ai.cooldown <= 0) {
+        ai.cooldown = aiPeriod(ai);
+        aiStep(this, ai);
+      }
+    }
   }
 
   private updateHomebound(delta: number): void {
@@ -1762,6 +1774,26 @@ export class Game {
     this.hireKnight(b);
   }
 
+  /** The garrison buildings an owner has (finished or not, not burning). */
+  garrisonBuildingsOf(owner: number): number {
+    return this.buildings.filter((b) => !b.removed && b.burning === 0 && b.owner === owner && garrisonCapacityOf(b.type) >= 0).length;
+  }
+
+  /** Knights an owner has: inside garrisons, walking to one, or out attacking. */
+  knightsOf(owner: number): number {
+    let n = this.attackers.filter((a) => a.owner === owner).length;
+    for (const b of this.buildings) if (!b.removed && b.owner === owner) n += b.garrison;
+    for (const k of this.knights) if (this.buildings[k.building]?.owner === owner) n++;
+    return n;
+  }
+
+  /** A computer opponent plays `owner` from now on. */
+  addAi(owner: number, temperament: Temperament = Temperament.Defensive): AiPlayer {
+    const ai: AiPlayer = { owner, temperament, cooldown: aiPeriod({ owner, temperament, cooldown: 0, provoked: -1 }), provoked: -1 };
+    this.ais.push(ai);
+    return ai;
+  }
+
   /** Put knights straight into a finished Hut/Tower/Fortress (a script setting up a scenario), claiming its land at once. */
   setGarrison(building: number, knights: number): void {
     const b = this.buildings[building]!;
@@ -2011,6 +2043,7 @@ export class Game {
       knights: this.knights,
       nextKnight: this.nextKnight,
       attackers: this.attackers,
+      ais: this.ais,
       nextAttacker: this.nextAttacker,
       flags: this.flags,
       roads: this.roads,
@@ -2073,6 +2106,7 @@ export class Game {
     g.nextGeologist = d.nextGeologist ?? g.geologists.length;
     g.knights = d.knights ?? [];
     g.nextKnight = d.nextKnight ?? g.knights.length;
+    g.ais = d.ais ?? [];
     g.attackers = (d.attackers ?? []).map((a) => ({ ...a, rank: a.rank ?? 0, defRank: a.defRank ?? -1 }));
     g.nextAttacker = d.nextAttacker ?? g.attackers.length;
     g.flags = d.flags;
@@ -2531,6 +2565,8 @@ export class Game {
       }
     }
     this.alerts.push({ kind: 'attacked', owner: t.owner, building: target });
+    const victim = this.ais.find((a) => a.owner === t.owner);
+    if (victim) victim.provoked = this.tick;
     return sent;
   }
 
@@ -2670,7 +2706,7 @@ export class Game {
           const x = bx + dx;
           const y = by + dy;
           if (!this.inside(x, y)) continue;
-          if (hexDistance(x - cx, y - cy) > R) continue; // only the window being recomputed
+          if (Math.abs(x - cx) > R || Math.abs(y - cy) > R) continue; // only the (square) window being recomputed
           const inf = row[c]!;
           const pos = this.index(x, y);
           let byOwner = tally.get(pos);

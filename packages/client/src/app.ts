@@ -2,10 +2,16 @@
 // and selection, and every command that changes the sim. The renderer and the
 // panels only read from here.
 
-import { BuildingType, Game, MapObject, ORE_NAMES, SIGN_EMPTY, buildNeeds, type OreKind, Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
+import { BuildingType, Game, Temperament, MapObject, ORE_NAMES, SIGN_EMPTY, buildNeeds, type OreKind, Res, Terrain, signIsSmall, signKind, checkBuilding, checkFlag, checkFlagAt, planRoad } from '@sett/sim';
 import { BUILDING_NAME } from './palette.ts';
 import { type KV, exportSave, importSave, readSave, writeSave } from './persistence.ts';
 import { makeScenario, type ScenarioId } from './scenarios.ts';
+
+export const TEMPERAMENT_NAME: Record<Temperament, string> = {
+  [Temperament.Peaceful]: 'peaceful',
+  [Temperament.Defensive]: 'defensive',
+  [Temperament.Aggressive]: 'aggressive',
+};
 
 export const STEP_MS = 20; // 50 Hz, like the original on the vertical blank
 const MAX_CATCH_UP = 5; // beyond this the game slows down instead of freezing
@@ -369,6 +375,19 @@ export class App {
   }
 
   /** The player picked a building in the Build list: a site goes up here, its door on this flag. */
+  /** The computer opponent, if the game has one. */
+  get opponent() {
+    return this.game.ais[0] ?? null;
+  }
+
+  setTemperament(t: Temperament): void {
+    const ai = this.opponent;
+    if (!ai) return;
+    ai.temperament = t;
+    this.say(`The opponent is now ${TEMPERAMENT_NAME[t]}.`);
+    this.changed();
+  }
+
   /** Why the player cannot attack this building now (empty if they can), and how many knights could go. */
   attackOptions(building: number): { ok: boolean; reason: string; available: number } {
     const c = this.game.checkAttack(0, building);

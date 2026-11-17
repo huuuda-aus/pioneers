@@ -28,8 +28,9 @@ import {
   isStore,
   garrisonCapacityOf,
   goldCapacityOf,
+  Temperament,
 } from '@sett/sim';
-import type { App, Tool } from './app.ts';
+import { TEMPERAMENT_NAME, type App, type Tool } from './app.ts';
 import { BUILDING_COLOR, BUILDING_NAME, RES_COLOR } from './palette.ts';
 import { SCENARIOS, type ScenarioId } from './scenarios.ts';
 import { View } from './view.ts';
@@ -284,6 +285,7 @@ export function Root({ app }: { app: App }) {
           <Stats game={g} />
           <FoodSliders app={app} />
           <ToolSliders app={app} />
+          <Opponent app={app} />
           <Inspector app={app} />
         </div>
       </div>
@@ -457,6 +459,25 @@ function FoodSliders({ app }: { app: App }) {
 }
 
 /** What the toolmakers should make: one slider per tool, shown once a toolmaker exists. */
+/** Who the computer opponent is: pick how it plays, live. */
+function Opponent({ app }: { app: App }) {
+  const ai = app.opponent;
+  if (!ai) return null;
+  return (
+    <section>
+      <h2>Opponent</h2>
+      <select value={ai.temperament} onChange={(e) => app.setTemperament(Number(e.currentTarget.value))}>
+        {([Temperament.Peaceful, Temperament.Defensive, Temperament.Aggressive] as const).map((t) => (
+          <option key={t} value={t}>
+            {TEMPERAMENT_NAME[t]}
+          </option>
+        ))}
+      </select>
+      <p class="hint">Peaceful never attacks. Defensive hits back. Aggressive goes for weak garrisons.</p>
+    </section>
+  );
+}
+
 function ToolSliders({ app }: { app: App }) {
   const g = app.game;
   if (!g.buildings.some((b) => !b.removed && b.type === BuildingType.Toolmaker)) return null;

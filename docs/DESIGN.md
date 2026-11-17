@@ -295,6 +295,13 @@ them. (There is only ever one castle, and it can't be built.)
   lone castle's reach, keep working. The passive check from the paragraph
   above is still the backstop for land that gets contested *after* you built
   on it. TypeScript only.
+- **Limits on military buildings**: a Hut, Tower or Fortress must stand more
+  than 2 steps (`MILITARY_SPACING`) from any other military building, castle
+  and enemy ones included (freeserf's `can_build_military`), and an owner may
+  not have more than 2 (`MILITARY_SLACK`) garrison buildings beyond the knights
+  they have (`Game.knightsOf`: inside garrisons, walking to one, or out
+  attacking), so you cannot ring a border with empty shells. Both are plain
+  placement refusals with a reason.
 - **Garrisons** (Hut, Tower, Fortress): each wants knights up to its capacity
   (3/6/12) — no occupation slider yet, always full strength. A knight is a
   generic worker armed with one sword and one shield from the nearest
@@ -333,6 +340,25 @@ them. (There is only ever one castle, and it can't be built.)
   gold a slow `hash01` roll does it for free (freeserf's training odds,
   scaled). The strongest knight goes out to attack and to defend. No castle
   garrison, retreat or threat-level matrix yet. TypeScript only.
+- **The opponent** (`ai.ts`, `Game.ais`, `Game.addAi`): a computer player that
+  plays by the player's rules. Every `period` ticks (450 / 300 / 200 for a
+  peaceful / defensive / aggressive temperament) it makes one decision: first
+  the economy it needs (2 lumberjacks, a sawmill, a stonecutter, a forester),
+  then a Hut or, later, a Tower on its own land facing the enemy castle, and
+  when it can afford a building the castle must hold the planks and stone and
+  a sword and shield; then an attack. Sites are chosen from its own land by
+  score (near trees and rocks for the wood trades) through `checkBuilding`,
+  the door flag is joined by `planRoad` to the nearest flag of its own with a
+  flag every second tile, and a site it cannot connect is demolished. Peaceful
+  never attacks; defensive hits back for 20000 ticks after being attacked
+  (`AiPlayer.provoked`, set in `sendAttack`) when it can spare more knights
+  than the target holds; aggressive attacks the weakest garrison in reach
+  whenever it can send one more knight than it holds. Its state is just
+  `{owner, temperament, cooldown, provoked}`, saved; every choice is a
+  function of the game and `hash01`, so a saved game replays exactly. **Not
+  yet**: mining, smelting, weaponsmith or food (the scenario stocks swords,
+  shields and gold in both castles), demolition, repairs, a second storage.
+  TypeScript only.
 - **Parity**: `logistics/` is the C++ original of the logistics economy. `pnpm gen:parity`
   runs it over 19 scenarios and stores the results plus a state fingerprint
   (FNV hash of every flag, carrier, building and counter) in

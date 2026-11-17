@@ -8,6 +8,7 @@ import {
   FLAT_HEIGHT,
   Game,
   OreKind,
+  Temperament,
   Terrain,
   Res,
   flattenArea,
@@ -26,7 +27,7 @@ export const SCENARIOS: { id: ScenarioId; name: string; help: string }[] = [
   { id: 'new', name: 'New game', help: 'Just the castle on fresh terrain, as in the original. Build out from it.' },
   { id: 'food', name: 'Food and mining', help: 'The whole food chain, built: fisher, farm, mill, well and baker feed a stone mine on the mountain. Cut a road and watch the mine starve.' },
   { id: 'demo', name: 'Running colony', help: 'A working chain: two lumberjacks, a sawmill and the castle. Add more with the tools.' },
-  { id: 'territory', name: 'Two colonies', help: 'Your castle in the west, a rival\'s far to the east, and a garrisoned hut each facing the other in the middle. Select theirs and attack.' },
+  { id: 'territory', name: 'Two colonies', help: 'Your castle in the west, a rival\'s far to the east, and a garrisoned hut each facing the other in the middle. Select theirs and attack. The rival builds out and fights back: pick how in the Opponent panel.' },
 ];
 
 const COLS = 48;
@@ -234,6 +235,12 @@ function territoryScenario(): Game {
   // some gold on both sides: it raises each army's strength away from home and promotes knights
   g.addStock(g.castleOf(0), Res.Gold, 6);
   g.addStock(g.castleOf(1), Res.Gold, 6);
+  // swords and shields to arm knights with (nobody mines for them yet), for you and the opponent alike
+  for (const owner of [0, 1]) {
+    g.addStock(g.castleOf(owner), Res.Sword, 16);
+    g.addStock(g.castleOf(owner), Res.Shield, 16);
+  }
+  g.addAi(1, Temperament.Defensive);
   front.forEach(([x, y], owner) => {
     const p = findSite(g, BuildingType.Hut, x, y, owner);
     if (p < 0) throw new Error('scenario: no site for the front-line hut');

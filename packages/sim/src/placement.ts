@@ -4,8 +4,8 @@
 // All numbers here are placeholders to tune by feel, in the spirit of the
 // original (steeper land fits small buildings, big ones need level ground).
 
-import { BuildingType, DIRS, Dir, UNCLAIMED } from './types.ts';
-import { Terrain } from './terrain.ts';
+import { BuildingType, DIRS, Dir, MILITARY_SLACK, MILITARY_SPACING, UNCLAIMED, garrisonCapacityOf, militaryStrength } from './types.ts';
+import { Terrain, hexDistance } from './terrain.ts';
 import { MapObject, OreKind, oreKindOf } from './objects.ts';
 import type { Game } from './game.ts';
 
@@ -148,6 +148,20 @@ export function checkBuilding(game: Game, type: BuildingType, pos: number, owner
   if (pos < 0) return fail('outside the map');
   if (!footprint) return fail('too close to the map edge');
   if (flagPos < 0) return fail('no room for its flag');
+
+  if (garrisonCapacityOf(type) >= 0) {
+    const x = pos % game.cols;
+    const y = Math.floor(pos / game.cols);
+    for (const o of game.buildings) {
+      if (o.removed || o.pos < 0 || militaryStrength(o) < 0) continue;
+      if (hexDistance((o.pos % game.cols) - x, Math.floor(o.pos / game.cols) - y) <= MILITARY_SPACING) {
+        return fail('too close to another military building');
+      }
+    }
+    if (game.garrisonBuildingsOf(owner) >= game.knightsOf(owner) + MILITARY_SLACK) {
+      return fail('not enough knights for another garrison: arm some first');
+    }
+  }
 
   for (const q of footprint) {
     if (!ownable(game, q, owner)) return fail('that land belongs to someone else');

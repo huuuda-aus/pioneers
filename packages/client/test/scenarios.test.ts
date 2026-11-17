@@ -1,7 +1,7 @@
 // Scenarios are built with the same checked placement the player uses, so a
 // layout that breaks a rule throws here instead of surprising someone later.
 import { describe, expect, it } from 'vitest';
-import { BuildingType, FLAT_HEIGHT, HARVEST_RADIUS, MapObject, OreKind, Res, UNCLAIMED, hexDistance } from '@sett/sim';
+import { Temperament, BuildingType, FLAT_HEIGHT, HARVEST_RADIUS, MapObject, OreKind, Res, UNCLAIMED, hexDistance } from '@sett/sim';
 import { makeScenario } from '../src/scenarios.ts';
 import { App } from '../src/app.ts';
 
@@ -144,6 +144,8 @@ describe('two colonies', () => {
     expect(g.availableKnights(0, theirs.index)).toBe(2);
     expect(g.buildings[g.castleOf(0)]!.stock[Res.Gold]).toBe(6);
     expect(g.awayMorale(0)).toBe(11264); // an even split of the world's gold
+    expect(g.ais.map((x) => x.owner)).toEqual([1]); // the rival is a computer player
+    expect(g.buildings[g.castleOf(1)]!.stock[Res.Sword]).toBe(16);
   });
 
   it('plays through an attack from the app: toasts, march, duel', () => {
@@ -155,6 +157,15 @@ describe('two colonies', () => {
     for (let i = 0; i < 6000; i++) app.frame(20);
     expect(app.game.attackers.length).toBe(0);
     expect(app.toast).toMatch(/captured|lost|under attack|Sent/i);
+  });
+
+  it('lets you change how the opponent plays, and it builds out over time', () => {
+    const app = new App('territory', null);
+    app.setTemperament(Temperament.Aggressive);
+    expect(app.opponent!.temperament).toBe(Temperament.Aggressive);
+    const before = app.game.buildings.filter((b) => b.owner === 1 && !b.removed).length;
+    for (let i = 0; i < 6000; i++) app.frame(20);
+    expect(app.game.buildings.filter((b) => b.owner === 1 && !b.removed).length).toBeGreaterThan(before);
   });
 
   it('runs: owner 0 is a playable colony like any other new game', () => {

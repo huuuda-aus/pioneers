@@ -3,7 +3,7 @@
 // building occupies, the list of growing saplings) is left out and rebuilt on
 // load, so a save cannot disagree with itself about the layout.
 
-import type { Attacker, Building, Flag, Geologist, Knight, Road, StoreLimits, Transporter } from './types.ts';
+import type { AiPlayer, Attacker, Building, Flag, Geologist, Knight, Road, StoreLimits, Transporter } from './types.ts';
 
 export const SAVE_VERSION = 1;
 
@@ -26,6 +26,7 @@ export interface SaveData {
   knights?: Knight[]; // absent in saves made before garrisons
   nextKnight?: number;
   attackers?: Attacker[]; // absent in saves made before combat
+  ais?: AiPlayer[]; // absent in saves made before computer opponents
   nextAttacker?: number;
   toolShare?: number[]; // absent in saves made before there were kinds of tool
   tools?: boolean; // absent in saves made before workers needed tools

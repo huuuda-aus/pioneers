@@ -47,6 +47,55 @@ describe('building on someone else\'s land', () => {
   });
 });
 
+describe('recomputing a window', () => {
+  it('keeps what another building holds in the corners of the window, which are further than the radius', () => {
+    const g = new Game(80, 40);
+    g.placeBuilding(T.Castle, g.index(56, 30), false, 1);
+    expect(g.ownerAt[g.index(56, 28)]).toBe(1);
+    const f = g.addFlag(49, 31, 1);
+    const hut = g.addBuilding(T.Hut, f);
+    g.setGarrison(hut, 1); // recomputes the 17x17 window round the hut, whose corner takes in (56,28)
+    expect(g.ownerAt[g.index(56, 28)]).toBe(1);
+  });
+});
+
+describe('how many military buildings you may have', () => {
+  it('keeps them apart: nothing within 2 steps of another, the castle included', () => {
+    const g = new Game(40, 30);
+    g.placeBuilding(T.Castle, g.index(10, 14), false, 0);
+    g.placeBuilding(T.Hut, g.index(10, 8), false, 0);
+    expect(() => g.placeBuilding(T.Hut, g.index(10, 10), false, 0)).toThrow(/too close to another military/);
+    expect(() => g.placeBuilding(T.Hut, g.index(11, 9), false, 0)).toThrow(/too close to another military/);
+    expect(() => g.placeBuilding(T.Hut, g.index(10, 5), false, 0)).not.toThrow(); // 3 steps from the first
+    // not military buildings: workshops may stand right beside one
+    expect(() => g.placeBuilding(T.Lumberjack, g.index(14, 9), true, 0)).not.toThrow();
+  });
+
+  it('never more than two garrison buildings beyond the knights you actually have', () => {
+    const g = new Game(60, 30);
+    g.placeBuilding(T.Castle, g.index(30, 15), false, 0);
+    const huts = [g.placeBuilding(T.Hut, g.index(30, 9), false, 0), g.placeBuilding(T.Hut, g.index(30, 21), false, 0)];
+    expect(() => g.placeBuilding(T.Hut, g.index(24, 15), false, 0)).toThrow(/not enough knights/);
+    expect(() => g.placeBuilding(T.Tower, g.index(36, 15), false, 0)).toThrow(/not enough knights/);
+    g.setGarrison(huts[0]!, 1);
+    expect(g.knightsOf(0)).toBe(1);
+    expect(() => g.placeBuilding(T.Hut, g.index(24, 15), false, 0)).not.toThrow();
+    expect(() => g.placeBuilding(T.Hut, g.index(36, 15), false, 0)).toThrow(/not enough knights/); // 3 buildings, 1 knight
+  });
+
+  it('counts knights on the road and out fighting, and each owner on their own', () => {
+    const g = new Game(60, 30);
+    g.placeBuilding(T.Castle, g.index(10, 15), false, 0);
+    g.placeBuilding(T.Castle, g.index(50, 15), false, 1);
+    const h = g.placeBuilding(T.Hut, g.index(10, 8), false, 0);
+    g.knights.push({ id: 0, home: 0, building: h, counter: 100, total: 100 });
+    expect(g.knightsOf(0)).toBe(1);
+    expect(g.knightsOf(1)).toBe(0);
+    expect(g.garrisonBuildingsOf(0)).toBe(1);
+    expect(g.garrisonBuildingsOf(1)).toBe(0);
+  });
+});
+
 describe('two castles far apart', () => {
   it("do not reach each other's land", () => {
     const g = new Game(60, 20);
