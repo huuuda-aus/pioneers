@@ -252,3 +252,11 @@ describe('food and mining', () => {
     for (let r = 0; r < 8; r++) expect(g.created[r]! - g.consumed[r]! - g.lost[r]!).toBe(g.countItems(r as Res));
   });
 });
+
+describe('the rival in the territory scenario', { timeout: 120000 }, () => {
+  it('keeps mining iron through a long game instead of stalling when its first mine runs dry', () => {
+    const g = makeScenario('territory');
+    for (let i = 0; i < 400000; i++) g.update();
+    expect(g.created[Res.IronOre]!).toBeGreaterThan(200); // used to stall near 120: no carriers left, a bread chain without a well, unreachable mine spots retried for ever
+  });
+});

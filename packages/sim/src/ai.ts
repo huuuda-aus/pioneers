@@ -28,6 +28,12 @@ const PROVOKED_TICKS = 20000;
 const SEEK_EXTRA = 6;
 /** Sites it will leave unfinished at once before waiting for builders. */
 const MAX_SITES = 2;
+/** Carriers the castle keeps back from expansion: every road needs one, and a mine's road left without is a mine never built. */
+const CARRIER_RESERVE = 12;
+/** Below this many spare carriers it merges roads to free some. */
+const CARRIER_LOW = 8;
+/** Spots it will try for one building before giving up for the step. */
+const BUILD_ATTEMPTS = 5;
 
 /** What it wants before it thinks about soldiers, in order. */
 const ECONOMY: [BuildingType, number][] = [
@@ -47,6 +53,9 @@ const GLUT: Partial<Record<BuildingType, [Res, number]>> = {
   [BuildingType.Sawmill]: [Res.Plank, 100],
   [BuildingType.Stonecutter]: [Res.Stone, 100],
   [BuildingType.Fisher]: [Res.Fish, 100],
+  [BuildingType.Well]: [Res.Water, 60],
+  [BuildingType.Farm]: [Res.Wheat, 60],
+  [BuildingType.Mill]: [Res.Flour, 60],
   [BuildingType.CoalMine]: [Res.Coal, 100],
   [BuildingType.IronMine]: [Res.IronOre, 60],
   [BuildingType.GoldMine]: [Res.GoldOre, 60],
@@ -63,8 +72,9 @@ function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number, worki
   const stock = g.buildings[g.castleOf(ai.owner)]!.stock;
   for (const [type, want] of ECONOMY) for (let i = count(type); i < want; i++) out.push(type);
   // food the mines will eat: fish if there is water to be had, else the bread chain
-  if (count(T.Fisher) === 0 && count(T.Baker) === 0) {
-    if (count(T.Farm) === 0) out.push(T.Fisher);
+  // (the bread chain is kept whole: a baker with no well beside it feeds nobody)
+  if (count(T.Fisher) === 0) {
+    if (count(T.Farm) === 0 && count(T.Baker) === 0) out.push(T.Fisher);
     for (const t of [T.Farm, T.Mill, T.Well, T.Baker]) if (count(t) === 0) out.push(t);
   }
   const fights = ai.temperament !== Temperament.Peaceful;
@@ -117,6 +127,30 @@ export function aiStep(g: Game, ai: AiPlayer): void {
     return;
   }
 
+  // a road left leading nowhere (the building at its end was pulled down) is taken up: it holds a carrier, and
+  // the castle has only so many, so a long game's dead ends would leave the roads that matter without one
+  for (const f of g.flags) {
+    if (f.removed || f.owner !== ai.owner || f.building >= 0) continue;
+    const live = f.road.filter((ri) => ri >= 0 && !g.roads[ri]!.removed);
+    if (live.length === 0) {
+      if (g.checkDemolishFlag(f.index).ok) g.demolishFlag(f.index); // left standing by a site given up
+      continue;
+    }
+    if (live.length !== 1) continue;
+    g.demolishRoad(live[0]!);
+    if (g.checkDemolishFlag(f.index).ok) g.demolishFlag(f.index);
+    return;
+  }
+
+  // carriers running short: a bare waypoint flag is taken out, so its two roads become one and need one carrier, not two
+  if (g.buildings[castle]!.carriers < CARRIER_LOW) {
+    const waypoint = g.flags.find((f) => !f.removed && f.owner === ai.owner && g.checkDemolishFlag(f.index).ok && f.road.some((ri) => ri >= 0));
+    if (waypoint) {
+      g.demolishFlag(waypoint.index);
+      return;
+    }
+  }
+
   // roads cut off from its castle (one half of a network that land changing hands split) are taken up: a road that
   // can never get a carrier stops the whole game's hiring for the step, so they must not be left standing
   const reach = reachableFlags(g, g.buildings[castle]!.flag);
@@ -156,7 +190,7 @@ export function aiStep(g: Game, ai: AiPlayer): void {
     }
     const military = own.filter((b) => isMilitaryType(b.type));
     const building = military.filter((b) => b.constructing).length;
-    if (building === 0 && military.length < KNOBS[ai.temperament].cap + (seek >= 0 ? SEEK_EXTRA : 0)) {
+    if (building === 0 && g.buildings[castle]!.carriers >= CARRIER_RESERVE && military.length < KNOBS[ai.temperament].cap + (seek >= 0 ? SEEK_EXTRA : 0)) {
       // towers soak up six swords each: not while it is short of them on the way to ore
       const tower = seek < 0 && military.length >= 3 && affordable(g, ai.owner, castle, BuildingType.Tower);
       const type = tower ? BuildingType.Tower : BuildingType.Hut;
@@ -217,16 +251,21 @@ function affordable(g: Game, owner: number, castle: number, type: BuildingType):
 // ---- building ---------------------------------------------------------
 
 function build(g: Game, ai: AiPlayer, type: BuildingType, seek = -1): boolean {
-  const pos = findSite(g, ai, type, seek);
-  if (pos < 0) return false;
-  let index: number;
-  try {
-    index = g.placeBuilding(type, pos, true, ai.owner);
-  } catch {
-    return false;
+  // a spot no road can reach (a mountain ledge, say) is dropped and the next best tried, not picked again and again
+  const skip = new Set<number>();
+  for (let attempt = 0; attempt < BUILD_ATTEMPTS; attempt++) {
+    const pos = findSite(g, ai, type, seek, skip);
+    if (pos < 0) return false;
+    skip.add(pos);
+    let index: number;
+    try {
+      index = g.placeBuilding(type, pos, true, ai.owner);
+    } catch {
+      continue;
+    }
+    if (connect(g, ai.owner, g.buildings[index]!.flag)) return true;
+    g.demolishBuilding(index); // no road to it: do not leave an orphan site
   }
-  if (connect(g, ai.owner, g.buildings[index]!.flag)) return true;
-  g.demolishBuilding(index); // no road to it: do not leave an orphan site
   return false;
 }
 
@@ -263,7 +302,7 @@ function treesNear(g: Game, pos: number, kind: MapObject): number {
 }
 
 /** Where to put a building: own land only, scored, best that placement accepts. */
-function findSite(g: Game, ai: AiPlayer, type: BuildingType, seek = -1): number {
+function findSite(g: Game, ai: AiPlayer, type: BuildingType, seek = -1, skip?: Set<number>): number {
   const castle = g.buildings[g.castleOf(ai.owner)]!;
   const military = isMilitaryType(type);
   const enemy = military ? enemyCastle(g, ai.owner) : -1;
@@ -273,7 +312,7 @@ function findSite(g: Game, ai: AiPlayer, type: BuildingType, seek = -1): number 
   const ore = oreKindOf(type);
   const cands: { p: number; score: number }[] = [];
   for (let p = 0; p < g.ownerAt.length; p++) {
-    if (g.ownerAt[p] !== ai.owner) continue;
+    if (g.ownerAt[p] !== ai.owner || skip?.has(p)) continue;
     const d0 = dist(g, p, castle.pos);
     if (d0 < 3) continue;
     if (ore !== OreKind.None && !(g.objects && g.objects.oreNear(p, ore) > 0)) continue; // a mine only where there is ore to dig
@@ -316,7 +355,7 @@ function connect(g: Game, owner: number, flag: number): boolean {
   const near = g.flags
     .filter((f) => !f.removed && f.owner === owner && f.index !== flag && reach.has(f.index))
     .sort((a, b) => dist(g, a.pos, here) - dist(g, b.pos, here) || a.index - b.index)
-    .slice(0, 4);
+    .slice(0, 12);
   for (const f of near) {
     const path = planRoad(g, flag, f.pos);
     if (!path) continue;
@@ -324,7 +363,7 @@ function connect(g: Game, owner: number, flag: number): boolean {
     let p = here;
     path.forEach((d, i) => {
       p = g.move(p, d);
-      if (i % 2 === 1 && i < path.length - 2 && checkFlag(g, p, owner).ok) g.addFlag(p % g.cols, Math.floor(p / g.cols), owner);
+      if (i % 4 === 3 && i < path.length - 2 && checkFlag(g, p, owner).ok) g.addFlag(p % g.cols, Math.floor(p / g.cols), owner);
     });
     return true;
   }

@@ -378,7 +378,14 @@ them. (There is only ever one castle, and it can't be built.)
   which gives its pick back, and builds the next where ore is left; roads cut
   off from its castle are taken up (a road that can never get a carrier stops
   all hiring for the step) and new roads only join flags its castle reaches; a
-  site cut off from its castle is rejoined or given up. **Not yet**: more
+  site cut off from its castle is rejoined or given up. **Carriers** (the castle
+  has 40 and each road holds one) were what finally capped its iron: dead-end roads
+  left by pulled-down buildings are taken up, flags go on a road only every fourth
+  tile, bare waypoint flags are merged away when fewer than 8 carriers are spare,
+  and no new military building starts below 12. Its bread chain is kept whole
+  (a baker with no well feeds nobody) and wells, farms and mills are glut-checked
+  too; a spot no road can reach is dropped for the next best (up to 5 tries)
+  rather than retried for ever. **Not yet**: more
   than one of anything, demolition, repairs, a second storage, and expanding
   cleverly (the territory scenario guarantees a mountain of coal, iron
   and gold (radius 3, 40 ore a point) 13 steps from each castle, just beyond its reach, so one hut is
