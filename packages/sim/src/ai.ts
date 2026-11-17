@@ -4,7 +4,7 @@
 // own (a countdown, a temperament, when it was last attacked): every decision
 // is a function of the game and `hash01`, so a saved game replays exactly.
 
-import { BState, BuildingType, Res, garrisonCapacityOf, toolFor, type AiPlayer, type Building, Temperament } from './types.ts';
+import { BState, BuildingType, Res, garrisonCapacityOf, toolFor, type AiPlayer, type Building, Temperament, TOOL_KINDS } from './types.ts';
 import { hexDistance } from './terrain.ts';
 import { checkBuilding, checkFlag } from './placement.ts';
 import { planRoad } from './plan.ts';
@@ -32,6 +32,11 @@ const MAX_SITES = 2;
 const CARRIER_RESERVE = 12;
 /** Below this many spare carriers it merges roads to free some. */
 const CARRIER_LOW = 8;
+/** It puts up a storage (20 more carriers) when the castle has fewer than this many left, up to MAX_STORAGES. */
+const STORAGE_BELOW = 14;
+const MAX_STORAGES = 2;
+/** Two roads are merged only if together they stay this short: a very long road is a bottleneck for everything behind it. */
+const MERGE_MAX = 10;
 /** Spots it will try for one building before giving up for the step. */
 const BUILD_ATTEMPTS = 5;
 
@@ -58,8 +63,17 @@ const GLUT: Partial<Record<BuildingType, [Res, number]>> = {
   [BuildingType.Mill]: [Res.Flour, 60],
   [BuildingType.CoalMine]: [Res.Coal, 100],
   [BuildingType.IronMine]: [Res.IronOre, 60],
-  [BuildingType.GoldMine]: [Res.GoldOre, 60],
+  [BuildingType.GoldMine]: [Res.GoldOre, 30],
+  [BuildingType.GoldSmelter]: [Res.Gold, 20],
+  [BuildingType.IronSmelter]: [Res.Iron, 80],
+  [BuildingType.Weaponsmith]: [Res.Sword, 100],
 };
+
+/** Every kind of tool at least this many in the castle: a toolmaker is pulled down. */
+const TOOLS_ENOUGH = 3;
+/** Fewer than this of some tool: a toolmaker is wanted. */
+const TOOLS_WANTED = 2;
+const toolsStocked = (stock: ArrayLike<number>, n: number): boolean => TOOL_KINDS.every((r) => stock[r]! >= n);
 
 const isMilitaryType = (t: BuildingType): boolean => t !== BuildingType.Castle && garrisonCapacityOf(t) >= 0;
 
@@ -71,6 +85,8 @@ function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number, worki
   const out: BuildingType[] = [];
   const stock = g.buildings[g.castleOf(ai.owner)]!.stock;
   for (const [type, want] of ECONOMY) for (let i = count(type); i < want; i++) out.push(type);
+  // a storage brings 20 more carriers: put up another before the castle's 40 run out, as a growing colony must
+  if (g.buildings[g.castleOf(ai.owner)]!.carriers < STORAGE_BELOW && count(T.Storage) < MAX_STORAGES) out.push(T.Storage);
   // food the mines will eat: fish if there is water to be had, else the bread chain
   // (the bread chain is kept whole: a baker with no well beside it feeds nobody)
   if (count(T.Fisher) === 0) {
@@ -84,7 +100,7 @@ function wanted(g: Game, ai: AiPlayer, count: (t: BuildingType) => number, worki
   if (count(T.Weaponsmith) > 0 && working(T.CoalMine) < 2) out.push(T.CoalMine);
   if (count(T.IronMine) > 0) chain.push(T.IronSmelter);
   if (count(T.IronSmelter) > 0) {
-    if (g.tools) chain.push(T.Toolmaker);
+    if (g.tools && !toolsStocked(stock, TOOLS_WANTED)) chain.push(T.Toolmaker);
     chain.push(T.Weaponsmith);
   }
   // gold (morale, promotion) only once iron is really going into weapons, so it does not starve them of coal
@@ -120,6 +136,13 @@ export function aiStep(g: Game, ai: AiPlayer): void {
     }
   }
 
+  // a toolmaker turns iron into tools without limit: once every kind is in stock it is pulled down, or it eats the iron the weapons need
+  const toolmaker = own.find((b) => b.type === BuildingType.Toolmaker && !b.constructing);
+  if (toolmaker && toolsStocked(castleStock, TOOLS_ENOUGH)) {
+    g.demolishBuilding(toolmaker.index);
+    return;
+  }
+
   // a mine that has dug out its ore is pulled down: it hands its pick back, and the next one goes where ore is left
   const spent = own.find((b) => !b.constructing && oreKindOf(b.type) !== OreKind.None && b.state === BState.NoResource);
   if (spent) {
@@ -144,7 +167,7 @@ export function aiStep(g: Game, ai: AiPlayer): void {
 
   // carriers running short: a bare waypoint flag is taken out, so its two roads become one and need one carrier, not two
   if (g.buildings[castle]!.carriers < CARRIER_LOW) {
-    const waypoint = g.flags.find((f) => !f.removed && f.owner === ai.owner && g.checkDemolishFlag(f.index).ok && f.road.some((ri) => ri >= 0));
+    const waypoint = g.flags.find((f) => !f.removed && f.owner === ai.owner && g.checkDemolishFlag(f.index).ok && f.road.reduce((n, ri) => n + (ri >= 0 ? g.roads[ri]!.length : 0), 0) <= MERGE_MAX);
     if (waypoint) {
       g.demolishFlag(waypoint.index);
       return;

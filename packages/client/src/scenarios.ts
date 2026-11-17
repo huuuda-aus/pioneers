@@ -216,10 +216,10 @@ function foodScenario(): Game {
 const TERRITORY_COLS = 160;
 const TERRITORY_ROWS = 120;
 /** How far from a castle its guaranteed ore hill lies (just beyond the castle's own reach of 8). */
-const HILL_DISTANCE = 13;
+const HILL_DISTANCE = 14;
 /** The hill's size and how much ore each of its points holds: enough for a long game's mining. */
-const HILL_RADIUS = 3;
-const ORE_PER_POINT = 40;
+const HILL_RADIUS = 4;
+const ORE_PER_POINT = 60;
 
 function territoryScenario(): Game {
   const cols = TERRITORY_COLS;

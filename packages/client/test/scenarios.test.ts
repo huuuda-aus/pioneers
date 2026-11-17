@@ -259,4 +259,12 @@ describe('the rival in the territory scenario', { timeout: 120000 }, () => {
     for (let i = 0; i < 400000; i++) g.update();
     expect(g.created[Res.IronOre]!).toBeGreaterThan(200); // used to stall near 120: no carriers left, a bread chain without a well, unreachable mine spots retried for ever
   });
+
+  it('spends its iron on weapons, not on an endless run of tools, and stops once it has plenty', () => {
+    const g = makeScenario('territory');
+    for (let i = 0; i < 300000; i++) g.update();
+    const tools = [Res.Axe, Res.Pick, Res.Shovel, Res.Rod, Res.Scythe, Res.Saw, Res.Hammer, Res.Cleaver].reduce((n, r) => n + g.created[r]!, 0);
+    expect(tools).toBeLessThan(80);
+    expect(g.created[Res.Sword]!).toBeGreaterThan(120);
+  });
 });

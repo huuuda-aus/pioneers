@@ -385,7 +385,12 @@ them. (There is only ever one castle, and it can't be built.)
   and no new military building starts below 12. Its bread chain is kept whole
   (a baker with no well feeds nobody) and wells, farms and mills are glut-checked
   too; a spot no road can reach is dropped for the next best (up to 5 tries)
-  rather than retried for ever. **Not yet**: more
+  rather than retried for ever. **Throughput**: it builds a storage (20 more carriers) when
+  the castle is down to 14, up to two; merges only roads that stay under 10 tiles
+  together (a 179-tile road choked everything behind it); pulls down its toolmaker
+  once every tool is stocked three deep (left alone it turned 400 of 507 iron into
+  tools) and glut-checks smelters, weaponsmith and gold. The territory scenario's
+  ore hill is radius 4 with 60 ore a point, since the old one ran dry. **Not yet**: more
   than one of anything, demolition, repairs, a second storage, and expanding
   cleverly (the territory scenario guarantees a mountain of coal, iron
   and gold (radius 3, 40 ore a point) 13 steps from each castle, just beyond its reach, so one hut is
